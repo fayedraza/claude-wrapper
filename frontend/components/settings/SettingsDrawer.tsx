@@ -2,7 +2,14 @@
 
 import { useEffect, useRef, useState } from "react";
 
-import { applySettingsChange, proposeSettingsChange, type SettingAction } from "@/lib/settings-api";
+import {
+  applySettingsChange,
+  getCurrentConfiguration,
+  proposeSettingsChange,
+  type ConfigSummaryItem as ConfigSummaryItemData,
+  type SettingAction,
+} from "@/lib/settings-api";
+import ConfigSummaryItem from "./ConfigSummaryItem";
 import ProposedChangeCard, { type ProposedChangeStatus } from "./ProposedChangeCard";
 
 interface CardState {
@@ -18,6 +25,16 @@ type RequestState =
   | { phase: "error"; message: string }
   | { phase: "result"; userSummary: string };
 
+// FR-3: "Currently configured" section state, independent of the propose/
+// approve flow above -- a failure here must never block the rest of the
+// drawer (I/O matrix: "Fetch fails -- error message shown; rest of drawer
+// still works").
+type CurrentConfigState =
+  | { phase: "idle" }
+  | { phase: "loading" }
+  | { phase: "error"; message: string }
+  | { phase: "loaded"; items: ConfigSummaryItemData[] };
+
 interface SettingsDrawerProps {
   open: boolean;
   onClose: () => void;
@@ -31,9 +48,16 @@ export default function SettingsDrawer({ open, onClose }: SettingsDrawerProps) {
   const [requestText, setRequestText] = useState("");
   const [requestState, setRequestState] = useState<RequestState>({ phase: "idle" });
   const [cards, setCards] = useState<CardState[]>([]);
+  const [currentConfigState, setCurrentConfigState] = useState<CurrentConfigState>({ phase: "idle" });
 
   const dialogRef = useRef<HTMLDivElement>(null);
   const previouslyFocusedRef = useRef<HTMLElement | null>(null);
+  // Guards against out-of-order responses: loadCurrentConfiguration() can be
+  // triggered twice in quick succession (rapid close/reopen, or approving
+  // multiple cards back to back) -- only the response matching the latest
+  // call's token is allowed to write state, so a slower, older request can
+  // never clobber a newer one that already resolved.
+  const currentConfigRequestIdRef = useRef(0);
 
   // Docked slide-over drawer over a dimmed backdrop (DESIGN.md) -- Escape closes it (matching the
   // rest of the drawer family) and Tab is trapped inside the dialog while it's open.
@@ -79,7 +103,33 @@ export default function SettingsDrawer({ open, onClose }: SettingsDrawerProps) {
     previouslyFocusedRef.current = null;
   }, [open]);
 
+  // FR-3: fetch the "Currently configured" summary each time the drawer opens
+  // (I/O matrix: no stale snapshot carried across opens).
+  useEffect(() => {
+    if (!open) return;
+    void loadCurrentConfiguration();
+  }, [open]);
+
   if (!open) return null;
+
+  async function loadCurrentConfiguration() {
+    const requestId = ++currentConfigRequestIdRef.current;
+    // Only blank the section to "Loading…" for the first fetch -- a refresh
+    // (e.g. after Approve & Apply) keeps the previous items visible instead
+    // of flashing empty, since they're still valid until this resolves.
+    setCurrentConfigState((prev) => (prev.phase === "loaded" ? prev : { phase: "loading" }));
+    try {
+      const result = await getCurrentConfiguration();
+      if (requestId !== currentConfigRequestIdRef.current) return; // a newer request already landed
+      setCurrentConfigState({ phase: "loaded", items: result.items });
+    } catch (error) {
+      if (requestId !== currentConfigRequestIdRef.current) return; // a newer request already landed
+      setCurrentConfigState({
+        phase: "error",
+        message: error instanceof Error ? error.message : "Failed to load current configuration.",
+      });
+    }
+  }
 
   async function handleSubmit() {
     const trimmed = requestText.trim();
@@ -122,6 +172,9 @@ export default function SettingsDrawer({ open, onClose }: SettingsDrawerProps) {
     try {
       await applySettingsChange(card.action);
       updateCard(id, { status: "applied" });
+      // FR-3: reflect the applied change in "Currently configured" without
+      // requiring the drawer to be closed and reopened.
+      void loadCurrentConfiguration();
     } catch (error) {
       updateCard(id, {
         status: "error",
@@ -242,6 +295,36 @@ export default function SettingsDrawer({ open, onClose }: SettingsDrawerProps) {
               Nothing submitted yet — describe a rule or preference above to get started.
             </p>
           )}
+
+          <div className="mt-space-6 border-t border-black/5 pt-space-5 dark:border-white/10">
+            <p className="mb-space-2 text-label font-bold uppercase tracking-wide text-text2 dark:text-text2-dark">
+              Currently configured
+            </p>
+
+            {currentConfigState.phase === "loading" && (
+              <p className="text-small text-text2 dark:text-text2-dark">Loading…</p>
+            )}
+
+            {currentConfigState.phase === "error" && (
+              <p role="alert" className="text-small text-status-failed dark:text-status-failed-dark">
+                {currentConfigState.message}
+              </p>
+            )}
+
+            {currentConfigState.phase === "loaded" && currentConfigState.items.length === 0 && (
+              <p className="text-small leading-relaxed text-text2 dark:text-text2-dark">
+                Nothing configured yet — rules, agent personas, and permission grants will show up here.
+              </p>
+            )}
+
+            {currentConfigState.phase === "loaded" && currentConfigState.items.length > 0 && (
+              <div className="flex flex-col gap-space-2">
+                {currentConfigState.items.map((item, index) => (
+                  <ConfigSummaryItem key={`${item.kind}-${item.path}-${index}`} item={item} />
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </div>

@@ -4,8 +4,10 @@ Story 1.1 scaffolded a bare `/health` endpoint. Story 1.2 adds the Settings
 Router surface (FR-1/FR-2): `POST /api/settings/propose` classifies a
 natural-language request into proposed `.claude/` changes without writing
 anything; `POST /api/settings/apply` writes exactly one approved change.
-WebSocket/SSE handlers and Redis-mirror reads (AD-9) are built in later
-stories -- see `_bmad-output/planning-artifacts/architecture/architecture-claude-wrapper-2026-08-30/ARCHITECTURE-SPINE.md`.
+Story 1.3 adds `GET /api/settings/current` (FR-3): a strictly read-only
+summary of what's already configured in `.claude/`, walked fresh on every
+request. WebSocket/SSE handlers and Redis-mirror reads (AD-9) are built in
+later stories -- see `_bmad-output/planning-artifacts/architecture/architecture-claude-wrapper-2026-08-30/ARCHITECTURE-SPINE.md`.
 """
 
 from pathlib import Path
@@ -17,8 +19,9 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from brain.settings_router.apply import apply_action
-from brain.settings_router.models import SettingAction, SettingsRouterOutput
+from brain.settings_router.models import CurrentConfiguration, SettingAction, SettingsRouterOutput
 from brain.settings_router.router import SettingsPathError, classify_request
+from brain.settings_router.summary import get_current_configuration
 from gateway.errors import ErrorEnvelope
 
 app = FastAPI(title="Claude Wrapper Gateway", version="0.1.0")
@@ -103,6 +106,16 @@ def propose_settings(
     explicit approval.
     """
     return classify_request(payload.request, claude_dir, client)
+
+
+@app.get("/api/settings/current", response_model=CurrentConfiguration)
+def current_configuration(claude_dir: Path = Depends(get_claude_dir)) -> CurrentConfiguration:
+    """FR-3: read-only summary of what's already configured in `.claude/`.
+
+    Walks live on-disk state fresh on every request (no cached snapshot) and
+    never writes anything.
+    """
+    return get_current_configuration(claude_dir)
 
 
 @app.post("/api/settings/apply")
