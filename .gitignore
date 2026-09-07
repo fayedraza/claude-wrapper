@@ -28,3 +28,6 @@ venv/
 # Redis / local data
 *.rdb
 *.aof
+
+# BMad Claude Code runtime state
+.claude/scheduled_tasks.lock
