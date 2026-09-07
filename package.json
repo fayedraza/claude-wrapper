@@ -1,0 +1,20 @@
+{
+  "name": "claude-wrapper-tests",
+  "private": true,
+  "type": "module",
+  "description": "Playwright E2E/API test suite for claude-wrapper. Kept separate from frontend/package.json so test tooling never ships in the app bundle.",
+  "engines": {
+    "node": ">=20.9.0"
+  },
+  "scripts": {
+    "test:e2e": "playwright test -c tests/playwright.config.ts",
+    "test:e2e:ui": "playwright test -c tests/playwright.config.ts --ui",
+    "test:e2e:report": "playwright show-report"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0",
+    "@seontechnologies/playwright-utils": "4.4.0",
+    "dotenv": "17.4.2",
+    "typescript": "^5"
+  }
+}
