@@ -1,0 +1,14 @@
+[project]
+name = "backend"
+version = "0.1.0"
+description = "Add your description here"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi==0.141.1",
+    "fastmcp>=3.4.5,<3.5.0",
+    "langgraph==1.2.11",
+    "pydantic==2.13.5",
+    "redis==8.1.0",
+    "starlette>=1.0.1",
+    "uvicorn[standard]>=0.34.0",
+]
