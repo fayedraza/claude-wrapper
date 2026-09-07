@@ -3,9 +3,17 @@
 `get_current_configuration()` is the only entry point. It never writes
 anything and never caches -- every call walks `.claude/rules/*.md` and
 `.claude/agents/*.md` fresh (same "no cached snapshot" rule as
-`router.classify_request`), and checks `settings.json`/`settings.local.json`
-for a `permissionGrants` key (Boundaries: namespaced deliberately distinct
-from Claude Code's own reserved `permissions` key).
+`router.classify_request`), and checks `settings.local.json` for a
+`permissionGrants` key (Boundaries: namespaced deliberately distinct from
+Claude Code's own reserved `permissions` key).
+
+`settings.json` is never read for `permissionGrants` -- Story 1.4's
+`grants.py` never writes there (it's Claude Code's own reserved,
+team-shared file), so a `permissionGrants` entry hand-edited into
+`settings.json` is deliberately invisible everywhere in this app, not just
+unmanaged: this reader and the Permission Manager's own `list_grants()`
+now agree on exactly one location, with no partial/inconsistent view
+between the two.
 
 A genuine directory-level failure (e.g. permission denied listing `rules/`
 or `agents/`) is deliberately left unguarded here (see `_list_markdown_files`)
@@ -27,7 +35,7 @@ import yaml
 from .models import ConfigKind, ConfigSummaryItem, CurrentConfiguration
 from .router import display_path
 
-_SETTINGS_FILENAMES = ("settings.json", "settings.local.json")
+_SETTINGS_LOCAL_FILENAME = "settings.local.json"
 
 # `---\n...\n---` YAML frontmatter block at the very start of a file, matching
 # this repo's own SKILL.md convention (Design Notes).
@@ -141,38 +149,34 @@ def _split_frontmatter(text: str) -> tuple[dict[str, Any] | None, str]:
 
 
 def _permission_grant_items(claude_dir: Path) -> list[ConfigSummaryItem]:
-    """Show a row per entry under `permissionGrants` in `settings.json`/
-    `settings.local.json`, only when that key is present.
+    """Show a row per entry under `permissionGrants` in `settings.local.json`
+    only, matching exactly where `grants.py`'s `list_grants()` looks.
 
-    Still reads both files for display (Design Notes: unchanged from Story
-    1.3) even though `grants.py` (Story 1.4) only ever writes
-    `settings.local.json` -- `settings.json` could in principle carry a
-    hand-authored `permissionGrants` entry too, and this is read-only.
+    `settings.json` is never checked here (see module docstring) -- a
+    `permissionGrants` entry hand-edited into `settings.json` is invisible
+    to this summary, not merely unmanaged, so the two grant-reading code
+    paths in this app can never disagree with each other.
     """
-    items: list[ConfigSummaryItem] = []
-    for filename in _SETTINGS_FILENAMES:
-        settings_path = claude_dir / filename
-        if not settings_path.is_file():
-            continue
+    settings_path = claude_dir / _SETTINGS_LOCAL_FILENAME
+    if not settings_path.is_file():
+        return []
 
-        text = _read_text(settings_path)
-        if text is None:
-            continue
-        try:
-            data = json.loads(text)
-        except json.JSONDecodeError:
-            continue
-        if not isinstance(data, dict) or "permissionGrants" not in data:
-            continue
+    text = _read_text(settings_path)
+    if text is None:
+        return []
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(data, dict) or "permissionGrants" not in data:
+        return []
 
-        grants = data["permissionGrants"]
-        if not isinstance(grants, list):
-            continue
+    grants = data["permissionGrants"]
+    if not isinstance(grants, list):
+        return []
 
-        path_display = display_path(claude_dir, settings_path)
-        for grant in grants:
-            items.append(ConfigSummaryItem(kind=_grant_kind(grant), text=_grant_text(grant), path=path_display))
-    return items
+    path_display = display_path(claude_dir, settings_path)
+    return [ConfigSummaryItem(kind=_grant_kind(grant), text=_grant_text(grant), path=path_display) for grant in grants]
 
 
 def _grant_kind(grant: Any) -> ConfigKind:

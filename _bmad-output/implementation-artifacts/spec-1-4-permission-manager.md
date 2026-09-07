@@ -78,7 +78,7 @@ baseline_commit: '07a2ae3b1836227d9b3603a8bff50011e1d2c5fd'
 
 ## Design Notes
 
-Grants persist only in `settings.local.json` — a personal trust decision, not team-shared config; `settings.json` is Claude Code's own enforced file, out of scope. `summary.py` keeps reading `permissionGrants` from both files for display (unchanged from 1.3).
+Grants persist only in `settings.local.json` — a personal trust decision, not team-shared config; `settings.json` is Claude Code's own enforced file, out of scope. **Post-merge correction:** `summary.py` originally kept reading `permissionGrants` from both files for display (per Story 1.3, unchanged). This created a real, reachable inconsistency — a hand-edited `settings.json` entry would show up in the Settings drawer's summary but not in the Permission Manager's own list, which only ever read `settings.local.json`. Fixed by scoping `summary.py`'s reader to `settings.local.json` only, matching `grants.py`'s `list_grants()` exactly: a hand-edited `settings.json` entry is now invisible everywhere in the app, not merely unmanaged. Also confirmed real Claude Code's own `permissions.allow/ask/deny`/`allowedMcpServers` keys are irrelevant here — this app's agents aren't Claude Code CLI processes, so there's no Claude Code permission engine on the other end to hand grants to; enforcement is this app's own responsibility, in the not-yet-built `backend/engine/`.
 
 No mockup or `.config-kind.file` color exists — pick one distinct from `rule`/`agent`/`mcp`, reuse identically in `ConfigSummaryItem` and `PermissionGrantRow`.
 

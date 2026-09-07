@@ -197,22 +197,23 @@ def test_grants_written_via_add_grant_are_reflected_in_the_summary(claude_dir: P
 
 
 def test_no_permission_grants_key_yields_no_grant_rows(claude_dir: Path) -> None:
-    """Today's reality: settings.json has no `permissionGrants` key (e.g. only
-    a `hooks` block) -- the section is correctly empty, not an error."""
-    (claude_dir / "settings.json").write_text(json.dumps({"hooks": {}}), encoding="utf-8")
+    """Today's reality: settings.local.json has no `permissionGrants` key
+    (e.g. only some other key) -- the section is correctly empty, not an
+    error."""
+    (claude_dir / "settings.local.json").write_text(json.dumps({"someOtherKey": True}), encoding="utf-8")
 
     result = get_current_configuration(claude_dir)
 
     assert not any(item.kind == "mcp" for item in result.items)
 
 
-def test_no_settings_json_at_all_yields_no_grant_rows(claude_dir: Path) -> None:
+def test_no_settings_local_json_at_all_yields_no_grant_rows(claude_dir: Path) -> None:
     result = get_current_configuration(claude_dir)
     assert not any(item.kind == "mcp" for item in result.items)
 
 
 def test_permission_grants_present_are_rendered_as_mcp_rows(claude_dir: Path) -> None:
-    (claude_dir / "settings.json").write_text(
+    (claude_dir / "settings.local.json").write_text(
         json.dumps({"permissionGrants": [{"text": "filesystem: read/write access to src/"}]}),
         encoding="utf-8",
     )
@@ -222,20 +223,25 @@ def test_permission_grants_present_are_rendered_as_mcp_rows(claude_dir: Path) ->
     grant_items = [item for item in result.items if item.kind == "mcp"]
     assert len(grant_items) == 1
     assert grant_items[0].text == "filesystem: read/write access to src/"
-    assert grant_items[0].path == ".claude/settings.json"
+    assert grant_items[0].path == ".claude/settings.local.json"
 
 
 def test_permission_grants_empty_list_yields_no_rows(claude_dir: Path) -> None:
-    (claude_dir / "settings.json").write_text(json.dumps({"permissionGrants": []}), encoding="utf-8")
+    (claude_dir / "settings.local.json").write_text(json.dumps({"permissionGrants": []}), encoding="utf-8")
 
     result = get_current_configuration(claude_dir)
 
     assert not any(item.kind == "mcp" for item in result.items)
 
 
-def test_permission_grants_checked_in_both_settings_files(claude_dir: Path) -> None:
+def test_permission_grants_in_settings_json_are_never_rendered(claude_dir: Path) -> None:
+    """A `permissionGrants` entry hand-edited directly into `settings.json`
+    (Claude Code's own reserved, team-shared file) is invisible here -- not
+    merely unmanaged by the Permission Manager, but never displayed either,
+    so this reader and `grants.py`'s `list_grants()` can never disagree
+    about what's configured."""
     (claude_dir / "settings.json").write_text(
-        json.dumps({"permissionGrants": [{"text": "team grant"}]}), encoding="utf-8"
+        json.dumps({"permissionGrants": [{"text": "hand-edited team grant"}]}), encoding="utf-8"
     )
     (claude_dir / "settings.local.json").write_text(
         json.dumps({"permissionGrants": [{"text": "local grant"}]}), encoding="utf-8"
@@ -244,11 +250,11 @@ def test_permission_grants_checked_in_both_settings_files(claude_dir: Path) -> N
     result = get_current_configuration(claude_dir)
 
     grant_texts = {item.text for item in result.items if item.kind == "mcp"}
-    assert grant_texts == {"team grant", "local grant"}
+    assert grant_texts == {"local grant"}
 
 
 def test_multiple_permission_grant_entries_are_all_rendered(claude_dir: Path) -> None:
-    (claude_dir / "settings.json").write_text(
+    (claude_dir / "settings.local.json").write_text(
         json.dumps(
             {
                 "permissionGrants": [
@@ -267,11 +273,11 @@ def test_multiple_permission_grant_entries_are_all_rendered(claude_dir: Path) ->
         "filesystem: read/write access to src/",
         "network: outbound HTTPS only",
     ]
-    assert all(item.path == ".claude/settings.json" for item in grant_items)
+    assert all(item.path == ".claude/settings.local.json" for item in grant_items)
 
 
-def test_malformed_settings_json_is_ignored_not_a_crash(claude_dir: Path) -> None:
-    (claude_dir / "settings.json").write_text("{not valid json", encoding="utf-8")
+def test_malformed_settings_local_json_is_ignored_not_a_crash(claude_dir: Path) -> None:
+    (claude_dir / "settings.local.json").write_text("{not valid json", encoding="utf-8")
 
     result = get_current_configuration(claude_dir)
 
@@ -304,7 +310,7 @@ def test_get_current_configuration_propagates_real_directory_permission_error(cl
 def test_permission_grant_entry_without_known_fields_falls_back_to_generic_text(claude_dir: Path) -> None:
     """Never invent a permission-grant schema (Boundaries) -- an entry with no
     recognizable text/description/name still renders a row, not an error."""
-    (claude_dir / "settings.json").write_text(
+    (claude_dir / "settings.local.json").write_text(
         json.dumps({"permissionGrants": [{"unknownField": "x"}]}), encoding="utf-8"
     )
 
@@ -323,7 +329,7 @@ def test_rules_and_agents_and_grants_together(claude_dir: Path) -> None:
     (claude_dir / "rules" / "testing.md").write_text("Always use pytest.", encoding="utf-8")
     (claude_dir / "agents").mkdir()
     (claude_dir / "agents" / "worker.md").write_text("Does work.", encoding="utf-8")
-    (claude_dir / "settings.json").write_text(
+    (claude_dir / "settings.local.json").write_text(
         json.dumps({"permissionGrants": [{"text": "grant one"}]}), encoding="utf-8"
     )
 
@@ -384,7 +390,7 @@ def test_endpoint_returns_full_mixed_response_through_the_http_json_boundary(
     (claude_dir / "agents" / "auth-worker.md").write_text(
         "---\nname: auth_worker\ndescription: handles OAuth2 flows\n---\n", encoding="utf-8"
     )
-    (claude_dir / "settings.json").write_text(
+    (claude_dir / "settings.local.json").write_text(
         json.dumps({"permissionGrants": [{"text": "filesystem: read/write access to src/"}]}),
         encoding="utf-8",
     )
@@ -405,7 +411,7 @@ def test_endpoint_returns_full_mixed_response_through_the_http_json_boundary(
     assert by_kind["mcp"] == {
         "kind": "mcp",
         "text": "filesystem: read/write access to src/",
-        "path": ".claude/settings.json",
+        "path": ".claude/settings.local.json",
     }
 
 
