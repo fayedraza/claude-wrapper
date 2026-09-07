@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Claude Wrapper — Intent Submission</title>
+<style>
+/*
+  illustrates:
+  - Colors (accent #2D9CDB on the primary action + focus rings; text-primary/secondary contrast pairs on bg/surface)
+  - Layout (browser device frame; single-column entry screen: header status → hero input → process preview → history)
+  - Components (large plain-language intent input, pill status indicator, 3-step process strip, recent-run list row)
+  - State Patterns (empty-vs-filled input read as one canonical "just typed, ready to submit" state; completed vs
+    cancelled run status treated as distinct, low-drama badges — no heavy iconography)
+  - Typography (system font stack throughout; monospace reserved strictly for the repo path and token counts)
+  - Elevation (0 2px 8px rgba(0,0,0,.05) for recent-run cards; 0 6px 24px rgba(45,156,219,.10) for the hero input panel)
+  - Accessibility (visible focus-state ring on the textarea and the Plan This button; real contrast on all label text)
+*/
+
+:root {
+  --bg: #FFF8F0;
+  --surface: #FFFFFF;
+  --accent: #2D9CDB;
+  --text-primary: #1A1A2E;
+  --text-secondary: #6B6B7D;
+
+  --status-ok: #1F7A45;
+  --status-ok-bg: rgba(39,174,96,.12);
+  --status-cancel: #8A8A9A;
+  --status-cancel-bg: rgba(107,107,125,.10);
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: #E7E5DE;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+
+body { padding: 28px 16px; display: flex; justify-content: center; }
+
+.browser-frame {
+  width: min(1400px, 98vw);
+  background: var(--surface);
+  border-radius: 14px;
+  overflow: hidden;
+  border: 1px solid #E4E1D8;
+  box-shadow: 0 6px 24px rgba(45,156,219,.10), 0 1px 3px rgba(0,0,0,.06);
+}
+
+.browser-chrome {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 11px 16px;
+  background: #F2EFE9;
+  border-bottom: 1px solid #E4E1D8;
+}
+.traffic-lights { display: flex; gap: 8px; flex-shrink: 0; }
+.traffic-lights span { width: 11px; height: 11px; border-radius: 50%; display: inline-block; }
+.tl-red { background: #FF5F57; }
+.tl-yellow { background: #FEBC2E; }
+.tl-green { background: #28C840; }
+.browser-tabs { display: flex; gap: 6px; margin-right: 8px; }
+.browser-tab {
+  font-size: 12px; color: var(--text-secondary);
+  background: #FFFFFF; border: 1px solid #E4E1D8; border-bottom: none;
+  padding: 5px 12px; border-radius: 8px 8px 0 0;
+}
+.browser-tab.active { color: var(--text-primary); font-weight: 600; }
+.address-bar {
+  flex: 1; background: #FFFFFF; border: 1px solid #E4E1D8;
+  border-radius: 999px; padding: 6px 16px; font-size: 12.5px; color: var(--text-secondary);
+}
+
+.viewport {
+  background: var(--bg);
+  min-height: 860px;
+  padding: 28px 40px 40px 40px;
+}
+
+/* ---- app header ---- */
+.app-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid #EFE7DA;
+  margin-bottom: 30px;
+}
+.app-header-left { display: flex; align-items: baseline; gap: 14px; }
+.wordmark { font-size: 16px; font-weight: 700; color: var(--text-primary); }
+.wordmark::before {
+  content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+  background: var(--accent); margin-right: 8px;
+}
+.repo-line {
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+.repo-line code {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12px;
+  color: var(--text-primary);
+  background: #F2EFE9;
+  padding: 1px 6px;
+  border-radius: 6px;
+}
+
+.project-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--status-ok);
+  background: var(--status-ok-bg);
+  border-radius: 999px;
+  padding: 6px 14px;
+  flex-shrink: 0;
+}
+.project-status .dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--status-ok); flex-shrink: 0;
+}
+
+/* ---- hero intent input ---- */
+.hero {
+  max-width: 860px;
+  margin: 0 auto 34px auto;
+}
+.hero-label {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0 0 6px 0;
+  text-align: center;
+}
+.hero-sublabel {
+  font-size: 13.5px;
+  color: var(--text-secondary);
+  margin: 0 0 22px 0;
+  text-align: center;
+}
+
+.intent-panel {
+  background: var(--surface);
+  border: 1px solid #EFE7DA;
+  border-radius: 20px;
+  box-shadow: 0 6px 24px rgba(45,156,219,.10);
+  padding: 20px 20px 16px 20px;
+}
+
+.intent-input {
+  width: 100%;
+  min-height: 92px;
+  resize: none;
+  border: none;
+  outline: none;
+  font-family: inherit;
+  font-size: 17px;
+  line-height: 1.5;
+  color: var(--text-primary);
+  background: transparent;
+  padding: 4px 4px 0 4px;
+}
+.intent-input::placeholder { color: #A9A5B0; }
+.intent-input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+  border-radius: 8px;
+}
+
+.intent-panel-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 14px;
+  border-top: 1px solid #F1ECE0;
+  margin-top: 6px;
+}
+.intent-hint {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.btn {
+  font-size: 14px;
+  font-weight: 600;
+  padding: 11px 22px;
+  border-radius: 12px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  font-family: inherit;
+}
+.btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.btn-primary {
+  background: var(--accent);
+  color: #FFFFFF;
+  box-shadow: 0 2px 8px rgba(45,156,219,.28);
+}
+/* on press: 100ms ease scale(0.98) */
+
+/* ---- 3-step process preview ---- */
+.flow-strip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin: 20px auto 0 auto;
+}
+.flow-step {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  background: var(--surface);
+  border: 1px solid #EFE7DA;
+  border-radius: 999px;
+  padding: 6px 14px 6px 10px;
+}
+.flow-step .num {
+  width: 18px; height: 18px;
+  border-radius: 50%;
+  background: var(--bg);
+  border: 1px solid #E4DDC9;
+  color: var(--text-primary);
+  font-size: 10.5px;
+  font-weight: 700;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+.flow-step.current {
+  color: var(--accent);
+  border-color: rgba(45,156,219,.35);
+  background: rgba(45,156,219,.06);
+  font-weight: 600;
+}
+.flow-step.current .num { background: var(--accent); border-color: var(--accent); color: #FFFFFF; }
+.flow-arrow { color: #C9C3B4; font-size: 13px; }
+
+/* ---- recent runs ---- */
+.recent {
+  max-width: 860px;
+  margin: 0 auto;
+}
+.recent-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  margin: 0 0 12px 0;
+}
+
+.run-list { display: flex; flex-direction: column; gap: 10px; }
+
+.run-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  background: var(--surface);
+  border: 1px solid #F1ECE0;
+  border-radius: 16px;
+  box-shadow: 0 2px 8px rgba(0,0,0,.05);
+  padding: 14px 18px;
+}
+.run-row-main { min-width: 0; }
+.run-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.run-meta {
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  margin-top: 3px;
+}
+.run-meta code {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 11.5px;
+  color: var(--text-secondary);
+}
+
+.run-badge {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 4px 11px;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+.run-badge.completed { background: var(--status-ok-bg); color: var(--status-ok); }
+.run-badge.cancelled { background: var(--status-cancel-bg); color: var(--status-cancel); }
+
+</style>
+</head>
+<body>
+
+<div class="browser-frame">
+
+  <div class="browser-chrome">
+    <div class="traffic-lights">
+      <span class="tl-red"></span><span class="tl-yellow"></span><span class="tl-green"></span>
+    </div>
+    <div class="browser-tabs">
+      <div class="browser-tab active">Claude Wrapper</div>
+    </div>
+    <div class="address-bar">app.claudewrapper.dev/checkout-service</div>
+  </div>
+
+  <div class="viewport">
+
+    <div class="app-header">
+      <div class="app-header-left">
+        <span class="wordmark">Claude Wrapper</span>
+        <span class="repo-line">acme/<code>checkout-service</code> · main</span>
+      </div>
+      <span class="project-status">
+        <span class="dot"></span>
+        Project connected · .claude/ configured
+      </span>
+    </div>
+
+    <div class="hero">
+      <p class="hero-label">What do you want to do?</p>
+      <p class="hero-sublabel">Describe it in plain language. Claude Wrapper plans the work before anything runs.</p>
+
+      <div class="intent-panel">
+        <textarea class="intent-input" readonly>Add OAuth2 login with JWT</textarea>
+        <div class="intent-panel-footer">
+          <span class="intent-hint">This starts planning only — nothing executes yet.</span>
+          <button class="btn btn-primary">Plan This</button>
+        </div>
+      </div>
+
+      <div class="flow-strip">
+        <div class="flow-step current"><span class="num">1</span>Plan</div>
+        <span class="flow-arrow">&rarr;</span>
+        <div class="flow-step"><span class="num">2</span>Review &amp; Approve</div>
+        <span class="flow-arrow">&rarr;</span>
+        <div class="flow-step"><span class="num">3</span>Run</div>
+      </div>
+    </div>
+
+    <div class="recent">
+      <p class="recent-title">Recent runs</p>
+      <div class="run-list">
+        <div class="run-row">
+          <div class="run-row-main">
+            <div class="run-title">Add rate limiting to /api/checkout</div>
+            <div class="run-meta">Completed · 3 agents · <code>12.4k tokens</code> · 2 hours ago</div>
+          </div>
+          <span class="run-badge completed">Completed</span>
+        </div>
+        <div class="run-row">
+          <div class="run-row-main">
+            <div class="run-title">Refactor db connection pooling</div>
+            <div class="run-meta">Cancelled during review · yesterday</div>
+          </div>
+          <span class="run-badge cancelled">Cancelled</span>
+        </div>
+        <div class="run-row">
+          <div class="run-row-main">
+            <div class="run-title">Fix flaky test in payment_service</div>
+            <div class="run-meta">Completed · 1 agent · <code>4.2k tokens</code> · 3 days ago</div>
+          </div>
+          <span class="run-badge completed">Completed</span>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+</body>
+</html>

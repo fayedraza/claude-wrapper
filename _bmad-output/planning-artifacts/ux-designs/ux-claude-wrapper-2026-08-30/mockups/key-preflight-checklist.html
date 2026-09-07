@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Claude Wrapper — Pre-Flight Checklist</title>
+<style>
+/*
+  illustrates:
+  - Colors (accent used for primary action + selection state; text-primary/secondary contrast pairs on surface)
+  - Layout (browser device frame; modal overlay pattern over a dimmed app backdrop)
+  - Components (grouped checklist item, per-agent group header, MCP-server row, primary/secondary action pair)
+  - State Patterns (per-item approve/reject checkbox state, indeterminate group summary, sensitive-item flag)
+  - Typography (system font for agent names and labels; monospace reserved strictly for file paths and config filenames)
+  - Elevation (0 6px 24px rgba(45,156,219,.10) for the overlay panel)
+  - Accessibility (visible focus ring on checkboxes and buttons; real contrast on all label text)
+*/
+
+:root {
+  --bg: #FFF8F0;
+  --surface: #FFFFFF;
+  --accent: #2D9CDB;
+  --text-primary: #1A1A2E;
+  --text-secondary: #6B6B7D;
+
+  --status-waiting: #F5A623;
+  --status-trouble: #FF8C42;
+  --status-failed: #E74C3C;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: #E7E5DE;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+
+body { padding: 28px 16px; display: flex; justify-content: center; }
+
+.browser-frame {
+  width: min(1400px, 98vw);
+  background: var(--surface);
+  border-radius: 14px;
+  overflow: hidden;
+  border: 1px solid #E4E1D8;
+  box-shadow: 0 6px 24px rgba(45,156,219,.10), 0 1px 3px rgba(0,0,0,.06);
+}
+
+.browser-chrome {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 11px 16px;
+  background: #F2EFE9;
+  border-bottom: 1px solid #E4E1D8;
+}
+.traffic-lights { display: flex; gap: 8px; flex-shrink: 0; }
+.traffic-lights span { width: 11px; height: 11px; border-radius: 50%; display: inline-block; }
+.tl-red { background: #FF5F57; }
+.tl-yellow { background: #FEBC2E; }
+.tl-green { background: #28C840; }
+.browser-tabs { display: flex; gap: 6px; margin-right: 8px; }
+.browser-tab {
+  font-size: 12px; color: var(--text-secondary);
+  background: #FFFFFF; border: 1px solid #E4E1D8; border-bottom: none;
+  padding: 5px 12px; border-radius: 8px 8px 0 0;
+}
+.browser-tab.active { color: var(--text-primary); font-weight: 600; }
+.address-bar {
+  flex: 1; background: #FFFFFF; border: 1px solid #E4E1D8;
+  border-radius: 999px; padding: 6px 16px; font-size: 12.5px; color: var(--text-secondary);
+}
+
+.viewport {
+  background: var(--bg);
+  min-height: 820px;
+  position: relative;
+}
+
+/* dimmed app behind the overlay, just enough to establish context */
+.backdrop-app {
+  padding: 24px 28px;
+  filter: saturate(0.9);
+  opacity: 0.5;
+}
+.backdrop-header {
+  display: flex; align-items: center; gap: 14px;
+  padding-bottom: 16px; border-bottom: 1px solid #EFE7DA; margin-bottom: 18px;
+}
+.wordmark { font-size: 15px; font-weight: 700; color: var(--text-primary); }
+.wordmark::before {
+  content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+  background: var(--accent); margin-right: 8px;
+}
+.backdrop-run { font-size: 14px; color: var(--text-secondary); }
+.backdrop-cards { display: flex; gap: 16px; }
+.backdrop-card {
+  width: 190px; height: 90px; border-radius: 18px; background: var(--surface);
+  border: 1px solid #EFE7DA; box-shadow: 0 2px 8px rgba(0,0,0,.05);
+}
+
+/* overlay scrim + panel */
+.scrim {
+  position: absolute; inset: 0;
+  background: rgba(26,26,46,0.32);
+  display: flex; align-items: flex-start; justify-content: center;
+  padding: 48px 24px;
+}
+
+.panel {
+  width: 100%;
+  max-width: 760px;
+  background: var(--surface);
+  border-radius: 20px;
+  box-shadow: 0 6px 24px rgba(45,156,219,.10), 0 12px 40px rgba(26,26,46,.18);
+  overflow: hidden;
+}
+/* panel entrance intent: 220ms ease-out, opacity 0->1 + translateY 8px->0 */
+
+.panel-header {
+  padding: 24px 28px 18px 28px;
+  border-bottom: 1px solid #F1ECE0;
+}
+.panel-header h1 {
+  margin: 0 0 6px 0;
+  font-size: 19px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+.panel-header p {
+  margin: 0;
+  font-size: 13.5px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+.panel-header p strong { color: var(--text-primary); font-weight: 600; }
+
+.panel-body {
+  max-height: 520px;
+  overflow-y: auto;
+  padding: 8px 28px 4px 28px;
+}
+
+.agent-group {
+  padding: 18px 0;
+  border-bottom: 1px solid #F5F0E6;
+}
+.agent-group:last-child { border-bottom: none; }
+
+.agent-group-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+.agent-group-title {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+.agent-group-title .name {
+  font-size: 14.5px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+.agent-group-title .role {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.agent-group-count {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: var(--bg);
+  border: 1px solid #EFE7DA;
+  padding: 3px 10px;
+  border-radius: 999px;
+}
+
+.item-list { display: flex; flex-direction: column; gap: 2px; }
+
+.item-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 9px 10px;
+  border-radius: 12px;
+}
+.item-row:hover { background: var(--bg); }
+
+.item-row input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 6px;
+  border: 1.5px solid #CFC9B8;
+  background: var(--surface);
+  margin-top: 2px;
+  flex-shrink: 0;
+  cursor: pointer;
+  position: relative;
+}
+.item-row input[type="checkbox"]:checked {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.item-row input[type="checkbox"]:checked::after {
+  content: "";
+  position: absolute;
+  left: 5px; top: 1px;
+  width: 5px; height: 9px;
+  border: solid #FFFFFF;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+.item-row input[type="checkbox"]:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+/* on toggle: 120ms ease background + border transition */
+
+.item-row-body { flex: 1; min-width: 0; }
+.item-row-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.item-path {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 13px;
+  color: var(--text-primary);
+  font-weight: 600;
+}
+.item-kind-badge {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+.item-kind-badge.file-read { background: rgba(45,156,219,.12); color: #1D6FA0; }
+.item-kind-badge.file-write { background: rgba(245,166,35,.15); color: #92600C; }
+.item-kind-badge.mcp { background: rgba(39,174,96,.14); color: #1F7A45; }
+
+.item-note {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-top: 3px;
+}
+.item-note.sensitive {
+  color: #B8571D;
+  font-weight: 600;
+}
+
+.panel-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 28px;
+  border-top: 1px solid #F1ECE0;
+  background: var(--bg);
+}
+
+.footer-summary {
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+.footer-summary strong { color: var(--text-primary); }
+
+.footer-actions { display: flex; gap: 10px; }
+
+.btn {
+  font-size: 13.5px;
+  font-weight: 600;
+  padding: 10px 18px;
+  border-radius: 12px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  font-family: inherit;
+}
+.btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.btn-secondary {
+  background: var(--surface);
+  border-color: #DDD6C4;
+  color: var(--text-primary);
+}
+.btn-primary {
+  background: var(--accent);
+  color: #FFFFFF;
+  box-shadow: 0 2px 8px rgba(45,156,219,.28);
+}
+/* on press: 100ms ease scale(0.98) */
+
+</style>
+</head>
+<body>
+
+<div class="browser-frame">
+
+  <div class="browser-chrome">
+    <div class="traffic-lights">
+      <span class="tl-red"></span><span class="tl-yellow"></span><span class="tl-green"></span>
+    </div>
+    <div class="browser-tabs">
+      <div class="browser-tab active">run_8823 · Pre-flight · Claude Wrapper</div>
+    </div>
+    <div class="address-bar">app.claudewrapper.dev/runs/run_8823/preflight</div>
+  </div>
+
+  <div class="viewport">
+
+    <div class="backdrop-app">
+      <div class="backdrop-header">
+        <span class="wordmark">Claude Wrapper</span>
+        <span class="backdrop-run">Run: add OAuth2 login with JWT</span>
+      </div>
+      <div class="backdrop-cards">
+        <div class="backdrop-card"></div>
+        <div class="backdrop-card"></div>
+        <div class="backdrop-card"></div>
+      </div>
+    </div>
+
+    <div class="scrim">
+      <div class="panel">
+
+        <div class="panel-header">
+          <h1>Review access before this run starts</h1>
+          <p>These agents are requesting access to run <strong>add OAuth2 login with JWT</strong>. Approve or reject each item individually — nothing is granted by default beyond what you check here.</p>
+        </div>
+
+        <div class="panel-body">
+
+          <div class="agent-group">
+            <div class="agent-group-header">
+              <div class="agent-group-title">
+                <span class="name">Orchestrator</span>
+                <span class="role">main run coordinator</span>
+              </div>
+              <span class="agent-group-count">2 of 2 selected</span>
+            </div>
+            <div class="item-list">
+              <label class="item-row">
+                <input type="checkbox" checked>
+                <div class="item-row-body">
+                  <div class="item-row-top">
+                    <span class="item-path">src/auth/</span>
+                    <span class="item-kind-badge file-read">read</span>
+                  </div>
+                  <div class="item-note">Directory scan to plan the OAuth2 module layout.</div>
+                </div>
+              </label>
+              <label class="item-row">
+                <input type="checkbox" checked>
+                <div class="item-row-body">
+                  <div class="item-row-top">
+                    <span class="item-path">.env</span>
+                    <span class="item-kind-badge file-read">read</span>
+                  </div>
+                  <div class="item-note sensitive">Contains secrets — read access only, no writes requested.</div>
+                </div>
+              </label>
+            </div>
+          </div>
+
+          <div class="agent-group">
+            <div class="agent-group-header">
+              <div class="agent-group-title">
+                <span class="name">backend_planner</span>
+                <span class="role">designs auth module layout</span>
+              </div>
+              <span class="agent-group-count">3 of 3 selected</span>
+            </div>
+            <div class="item-list">
+              <label class="item-row">
+                <input type="checkbox" checked>
+                <div class="item-row-body">
+                  <div class="item-row-top">
+                    <span class="item-path">src/auth/models.py</span>
+                    <span class="item-kind-badge file-read">read</span>
+                  </div>
+                  <div class="item-note">Existing user/session model to extend for OAuth2.</div>
+                </div>
+              </label>
+              <label class="item-row">
+                <input type="checkbox" checked>
+                <div class="item-row-body">
+                  <div class="item-row-top">
+                    <span class="item-path">docs/architecture.md</span>
+                    <span class="item-kind-badge file-read">read</span>
+                  </div>
+                  <div class="item-note">Reference for existing service boundaries.</div>
+                </div>
+              </label>
+              <label class="item-row">
+                <input type="checkbox" checked>
+                <div class="item-row-body">
+                  <div class="item-row-top">
+                    <span class="item-path">github_fastmcp_bridge</span>
+                    <span class="item-kind-badge mcp">mcp server</span>
+                  </div>
+                  <div class="item-note">Reads related issues and past PRs for context.</div>
+                </div>
+              </label>
+            </div>
+          </div>
+
+          <div class="agent-group">
+            <div class="agent-group-header">
+              <div class="agent-group-title">
+                <span class="name">auth_scaffold_worker</span>
+                <span class="role">scaffolds JWT auth code</span>
+              </div>
+              <span class="agent-group-count">2 of 3 selected</span>
+            </div>
+            <div class="item-list">
+              <label class="item-row">
+                <input type="checkbox" checked>
+                <div class="item-row-body">
+                  <div class="item-row-top">
+                    <span class="item-path">src/auth/jwt.py</span>
+                    <span class="item-kind-badge file-write">write</span>
+                  </div>
+                  <div class="item-note">Creates the JWT issuing and verification module.</div>
+                </div>
+              </label>
+              <label class="item-row">
+                <input type="checkbox" checked>
+                <div class="item-row-body">
+                  <div class="item-row-top">
+                    <span class="item-path">pyproject.toml</span>
+                    <span class="item-kind-badge file-write">write</span>
+                  </div>
+                  <div class="item-note">Adds PyJWT and bcrypt as dependencies.</div>
+                </div>
+              </label>
+              <label class="item-row">
+                <input type="checkbox">
+                <div class="item-row-body">
+                  <div class="item-row-top">
+                    <span class="item-path">stripe_fastmcp_bridge</span>
+                    <span class="item-kind-badge mcp">mcp server</span>
+                  </div>
+                  <div class="item-note sensitive">Not required for login scaffolding — unchecked by default.</div>
+                </div>
+              </label>
+            </div>
+          </div>
+
+        </div>
+
+        <div class="panel-footer">
+          <div class="footer-summary"><strong>7 of 8</strong> items approved across 3 agents</div>
+          <div class="footer-actions">
+            <button class="btn btn-secondary">Reject all</button>
+            <button class="btn btn-primary">Approve &amp; Run</button>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+  </div>
+</div>
+
+</body>
+</html>

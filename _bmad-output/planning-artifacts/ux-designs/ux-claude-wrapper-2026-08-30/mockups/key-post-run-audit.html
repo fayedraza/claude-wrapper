@@ -1,0 +1,924 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Claude Wrapper — Post-run Audit</title>
+<style>
+/*
+  This screen is the post-run audit view for a completed run (same run as the
+  DAG Canvas mock: Dana, "add OAuth2 login with JWT"), now finished.
+
+  DESIGN.md / EXPERIENCE.md concerns illustrated here:
+  - Colors: full light-mode token set + node status palette, reused as
+    historical/final-state indicators (not live indicators) — completed,
+    cancelled, and a resolved "trouble" detour are all shown as past states.
+  - Layout: browser device frame for a web app; a post-run dashboard built
+    from a summary strip, a two-column body (metrics table + replay panel),
+    and a full-width changelog — distinct from the live two-pane canvas.
+  - Components: telemetry chip (with expected-vs-actual sub-value), delta
+    indicator (under/over/on-track), per-agent metrics table, replay node
+    card, file-changelog row with change-type badge and agent attribution,
+    a visually separated "cancelled work" card.
+  - State Patterns: PRD FR-19 (expected vs. actual, per-agent + overall),
+    FR-20 (flight path replay — static, explicitly non-live), FR-21
+    (generated files changelog with per-agent attribution, including a file
+    that was never created because its author was cancelled), FR-22
+    (cancelled-run tokens tracked as a distinct line, never folded into the
+    completed-work total).
+  - Typography: system font for all agent/UI names; monospace reserved
+    narrowly for literal file paths in the changelog.
+  - Elevation: 0 2px 8px rgba(0,0,0,.05) on cards; 0 6px 24px
+    rgba(45,156,219,.10) on the browser frame.
+  - Accessibility: text/background pairs kept at real contrast ratios;
+    :focus-visible outline defined for the two interactive controls in the
+    header (Back, Export).
+*/
+
+:root {
+  --bg: #FFF8F0;
+  --surface: #FFFFFF;
+  --accent: #2D9CDB;
+  --text-primary: #1A1A2E;
+  --text-secondary: #6B6B7D;
+
+  --status-waiting: #F5A623;
+  --status-executing: #2D9CDB;
+  --status-trouble: #FF8C42;
+  --status-completed: #27AE60;
+  --status-cancelled: #9B9BAA;
+  --status-failed: #E74C3C;
+
+  --line: #EFE7DA;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: #E7E5DE;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+
+body {
+  padding: 28px 16px;
+  display: flex;
+  justify-content: center;
+}
+
+/* ---- browser device frame ---- */
+.browser-frame {
+  width: min(1400px, 98vw);
+  background: var(--surface);
+  border-radius: 14px;
+  overflow: hidden;
+  border: 1px solid #E4E1D8;
+  box-shadow: 0 6px 24px rgba(45,156,219,.10), 0 1px 3px rgba(0,0,0,.06);
+}
+
+.browser-chrome {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 11px 16px;
+  background: #F2EFE9;
+  border-bottom: 1px solid #E4E1D8;
+}
+
+.traffic-lights { display: flex; gap: 8px; flex-shrink: 0; }
+.traffic-lights span { width: 11px; height: 11px; border-radius: 50%; display: inline-block; }
+.tl-red { background: #FF5F57; }
+.tl-yellow { background: #FEBC2E; }
+.tl-green { background: #28C840; }
+
+.browser-tabs { display: flex; gap: 6px; margin-right: 8px; }
+.browser-tab {
+  font-size: 12px;
+  color: var(--text-secondary);
+  background: #FFFFFF;
+  border: 1px solid #E4E1D8;
+  border-bottom: none;
+  padding: 5px 12px;
+  border-radius: 8px 8px 0 0;
+}
+.browser-tab.active { color: var(--text-primary); font-weight: 600; }
+
+.address-bar {
+  flex: 1;
+  background: #FFFFFF;
+  border: 1px solid #E4E1D8;
+  border-radius: 999px;
+  padding: 6px 16px;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+
+/* ---- app viewport ---- */
+.viewport {
+  background: var(--bg);
+  min-height: 780px;
+}
+
+/* ---- header ---- */
+.app-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 16px 28px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+  flex-wrap: wrap;
+}
+
+.app-header-left { display: flex; align-items: baseline; gap: 14px; min-width: 0; }
+
+.wordmark {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+.wordmark::before {
+  content: "";
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  margin-right: 8px;
+}
+
+.run-title {
+  font-size: 15px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.run-title strong { color: var(--text-primary); font-weight: 600; }
+
+.app-header-right { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+
+.btn {
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-primary);
+  background: var(--surface);
+  border: 1px solid #DCD5C6;
+  padding: 7px 14px;
+  border-radius: 10px;
+  cursor: default;
+}
+.btn.primary {
+  color: #FFFFFF;
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.run-status-pill {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #1F7A45;
+  background: rgba(39,174,96,0.13);
+  border: 1px solid rgba(39,174,96,0.32);
+  padding: 5px 14px;
+  border-radius: 999px;
+}
+.run-status-pill .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--status-completed); }
+
+/* ---- summary strip ---- */
+.summary-strip {
+  display: flex;
+  gap: 12px;
+  padding: 18px 28px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+  flex-wrap: wrap;
+}
+
+.telemetry-chip {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 16px;
+  border-radius: 14px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  min-width: 150px;
+}
+.telemetry-chip .label {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-secondary);
+}
+.telemetry-chip .value {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+.telemetry-chip .value .vs {
+  font-weight: 500;
+  color: var(--text-secondary);
+  font-size: 12.5px;
+}
+.telemetry-chip .delta {
+  font-size: 11.5px;
+  font-weight: 600;
+  margin-top: 1px;
+}
+.telemetry-chip .delta.over { color: #B8571D; }
+.telemetry-chip .delta.under { color: #1F7A45; }
+
+.telemetry-chip.cancelled-chip {
+  border-style: dashed;
+  border-color: #C9C9D4;
+  background: #F4F3F6;
+}
+.telemetry-chip.cancelled-chip .label { color: #6B6B7D; }
+.telemetry-chip.cancelled-chip .value { color: #55556A; }
+.telemetry-chip.cancelled-chip .note {
+  font-size: 10.5px;
+  color: var(--text-secondary);
+  margin-top: 1px;
+  max-width: 220px;
+  line-height: 1.35;
+}
+
+/* ---- page body ---- */
+.page-body { padding: 24px 28px 32px; display: flex; flex-direction: column; gap: 20px; }
+
+.section-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.section-heading h2 {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.section-heading .sub {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  box-shadow: 0 2px 8px rgba(0,0,0,.05);
+  padding: 20px 22px;
+}
+
+.body-row { display: flex; gap: 20px; align-items: flex-start; }
+.col-main { flex: 1.5; min-width: 0; display: flex; flex-direction: column; gap: 20px; }
+.col-side { flex: 1; min-width: 0; }
+
+/* ---- FR-19: expected vs actual table ---- */
+table.metrics {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+table.metrics th {
+  text-align: left;
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
+  font-weight: 600;
+  padding: 0 8px 8px 8px;
+  border-bottom: 1px solid var(--line);
+}
+table.metrics th.num, table.metrics td.num { text-align: right; }
+table.metrics td {
+  padding: 10px 8px;
+  border-bottom: 1px solid #F5F0E6;
+  vertical-align: top;
+}
+table.metrics tr:last-of-type td { border-bottom: none; }
+
+.agent-cell { display: flex; align-items: flex-start; gap: 8px; }
+.agent-cell .status-dot { width: 8px; height: 8px; border-radius: 50%; margin-top: 5px; flex-shrink: 0; }
+.agent-cell.st-completed .status-dot { background: var(--status-completed); }
+.agent-cell-body .name { font-weight: 600; color: var(--text-primary); }
+.agent-cell-body .note {
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  margin-top: 3px;
+  max-width: 320px;
+  line-height: 1.4;
+}
+.agent-cell-body .note.trouble-note { color: #B8571D; }
+
+.metric-actual { font-weight: 700; color: var(--text-primary); font-variant-numeric: tabular-nums; }
+.metric-expected { color: var(--text-secondary); font-size: 11.5px; display: block; font-variant-numeric: tabular-nums; }
+.delta-tag {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 700;
+  margin-top: 3px;
+  font-variant-numeric: tabular-nums;
+}
+.delta-tag.over { color: #B8571D; }
+.delta-tag.under { color: #1F7A45; }
+.delta-tag.flat { color: var(--text-secondary); }
+
+tr.total-row td { padding-top: 14px; font-weight: 700; border-top: 2px solid var(--line); border-bottom: none; }
+tr.total-row .agent-cell-body .name { font-size: 13.5px; }
+
+/* ---- FR-22: cancelled work card ---- */
+.cancelled-card {
+  border: 1px dashed #C9C9D4;
+  background: #F7F6F9;
+  border-radius: 18px;
+  padding: 18px 22px;
+}
+.cancelled-card .section-heading h2 { color: #55556A; }
+.cancelled-row { display: flex; gap: 14px; align-items: flex-start; }
+.cancelled-row .status-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--status-cancelled); margin-top: 5px; flex-shrink: 0; }
+.cancelled-row-body { flex: 1; min-width: 0; }
+.cancelled-row-body .name { font-weight: 700; color: var(--text-primary); font-size: 14px; }
+.cancelled-row-body .reason { font-size: 12.5px; color: var(--text-secondary); margin-top: 4px; line-height: 1.45; max-width: 520px; }
+.cancelled-figures { display: flex; gap: 22px; margin-top: 12px; flex-wrap: wrap; }
+.cancelled-figure .label { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-secondary); }
+.cancelled-figure .value { font-size: 15px; font-weight: 700; color: #55556A; font-variant-numeric: tabular-nums; }
+.not-counted-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #55556A;
+  background: #EAE9EF;
+  border: 1px solid #D3D2DC;
+  padding: 4px 12px;
+  border-radius: 999px;
+  margin-top: 12px;
+}
+.not-counted-badge::before { content: "⊘"; font-size: 12px; }
+
+/* ---- FR-20: flight path replay ---- */
+.replay-panel {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  box-shadow: 0 2px 8px rgba(0,0,0,.05);
+  padding: 20px 20px 22px;
+}
+.replay-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  padding: 3px 10px;
+  border-radius: 999px;
+}
+.replay-badge .sq { width: 6px; height: 6px; background: var(--text-secondary); flex-shrink: 0; }
+
+.replay-legend {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+  margin-bottom: 16px;
+}
+.replay-legend .legend-item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+.replay-legend .swatch { width: 8px; height: 8px; border-radius: 50%; }
+
+.replay-timeline { display: flex; flex-direction: column; }
+.replay-node-row { display: flex; gap: 12px; }
+.replay-connector {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 16px;
+  flex-shrink: 0;
+}
+.replay-connector .node-dot { width: 11px; height: 11px; border-radius: 50%; margin-top: 14px; flex-shrink: 0; border: 2px solid var(--surface); box-shadow: 0 0 0 1.5px currentColor; }
+.replay-connector .stem { flex: 1; width: 2px; background: var(--line); margin: 2px 0; }
+.replay-node-row:last-child .replay-connector .stem { display: none; }
+
+.replay-node-row.st-completed .node-dot { color: var(--status-completed); background: var(--status-completed); }
+.replay-node-row.st-cancelled .node-dot { color: var(--status-cancelled); background: var(--status-cancelled); }
+
+.replay-card {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 11px 14px;
+  margin-bottom: 14px;
+}
+.replay-card-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.replay-card-name { font-size: 13.5px; font-weight: 700; color: var(--text-primary); }
+.replay-status-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 3px 9px 3px 7px;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+.replay-status-chip .dot { width: 6px; height: 6px; border-radius: 50%; }
+.replay-node-row.st-completed .replay-status-chip { background: rgba(39,174,96,.14); color: #1F7A45; }
+.replay-node-row.st-completed .replay-status-chip .dot { background: var(--status-completed); }
+.replay-node-row.st-cancelled .replay-status-chip { background: rgba(155,155,170,.16); color: #6B6B7D; }
+.replay-node-row.st-cancelled .replay-status-chip .dot { background: var(--status-cancelled); }
+
+.replay-card-role { font-size: 11.5px; color: var(--text-secondary); margin: 3px 0 9px; }
+
+.replay-detour-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+  font-weight: 600;
+  color: #B8571D;
+  background: rgba(255,140,66,.14);
+  padding: 2px 8px;
+  border-radius: 999px;
+  margin: 0 0 9px;
+}
+.replay-detour-tag .dot { width: 5px; height: 5px; border-radius: 50%; background: var(--status-trouble); }
+
+.replay-token-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.replay-token-figures { font-size: 11px; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+.replay-token-figures strong { color: var(--text-primary); font-size: 12.5px; }
+.token-bar { width: 84px; height: 5px; border-radius: 999px; background: #E9E2D3; overflow: hidden; position: relative; flex-shrink: 0; }
+.token-bar > span { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 999px; background: var(--accent); }
+.token-bar.over > span { background: var(--status-trouble); }
+
+/* ---- FR-21: generated files changelog ---- */
+table.filelog {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+table.filelog th {
+  text-align: left;
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
+  font-weight: 600;
+  padding: 0 10px 8px 10px;
+  border-bottom: 1px solid var(--line);
+}
+table.filelog td {
+  padding: 11px 10px;
+  border-bottom: 1px solid #F5F0E6;
+  vertical-align: middle;
+}
+table.filelog tr:last-of-type td { border-bottom: none; }
+table.filelog tr.not-created td { opacity: 0.72; }
+
+.file-path {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12.5px;
+  color: var(--text-primary);
+}
+.file-path.muted { color: var(--text-secondary); font-style: italic; }
+
+.change-badge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 11px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.change-badge.created { background: rgba(39,174,96,.14); color: #1F7A45; }
+.change-badge.modified { background: rgba(45,156,219,.13); color: #1D6FA0; }
+.change-badge.deleted { background: rgba(231,76,60,.13); color: #B23325; }
+.change-badge.not-created {
+  background: transparent;
+  border: 1px dashed #C9C9D4;
+  color: #6B6B7D;
+}
+
+.agent-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--text-primary);
+}
+.agent-tag + .agent-tag { margin-left: 10px; }
+.agent-tag .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--status-completed); flex-shrink: 0; }
+.agent-tag.cancelled-author .dot { background: var(--status-cancelled); }
+.agent-tag.cancelled-author { color: var(--text-secondary); font-style: italic; }
+
+</style>
+</head>
+<body>
+
+<div class="browser-frame">
+
+  <div class="browser-chrome">
+    <div class="traffic-lights">
+      <span class="tl-red"></span><span class="tl-yellow"></span><span class="tl-green"></span>
+    </div>
+    <div class="browser-tabs">
+      <div class="browser-tab active">run_8823 · audit · Claude Wrapper</div>
+    </div>
+    <div class="address-bar">app.claudewrapper.dev/runs/run_8823/audit</div>
+  </div>
+
+  <div class="viewport">
+
+    <div class="app-header">
+      <div class="app-header-left">
+        <span class="wordmark">Claude Wrapper</span>
+        <span class="run-title">Run: <strong>add OAuth2 login with JWT</strong></span>
+      </div>
+      <div class="app-header-right">
+        <button class="btn" type="button">Back to canvas</button>
+        <button class="btn primary" type="button">Export summary</button>
+        <div class="run-status-pill"><span class="dot"></span>Completed</div>
+      </div>
+    </div>
+
+    <div class="summary-strip">
+      <div class="telemetry-chip">
+        <span class="label">Elapsed (completed work)</span>
+        <span class="value">13m 56s <span class="vs">/ 11m 00s est.</span></span>
+        <span class="delta over">+2m 56s (+27%)</span>
+      </div>
+      <div class="telemetry-chip">
+        <span class="label">Tokens (completed work)</span>
+        <span class="value">49.8k <span class="vs">/ 41.0k est.</span></span>
+        <span class="delta over">+8.8k (+21%)</span>
+      </div>
+      <div class="telemetry-chip">
+        <span class="label">Agents</span>
+        <span class="value">4 completed <span class="vs">/ 1 cancelled</span></span>
+      </div>
+      <div class="telemetry-chip cancelled-chip">
+        <span class="label">Cancelled tokens</span>
+        <span class="value">6.4k</span>
+        <span class="note">Spent by jwt_test_writer before Dana cancelled it. Not counted in the totals above.</span>
+      </div>
+    </div>
+
+    <div class="page-body">
+
+      <div class="body-row">
+
+        <div class="col-main">
+
+          <!-- FR-19: expected vs actual -->
+          <div class="card">
+            <div class="section-heading">
+              <h2>Expected vs. actual</h2>
+              <span class="sub">per agent, completed work only</span>
+            </div>
+
+            <table class="metrics">
+              <thead>
+                <tr>
+                  <th>Agent</th>
+                  <th class="num">Time</th>
+                  <th class="num">Tokens</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>
+                    <div class="agent-cell st-completed">
+                      <span class="status-dot"></span>
+                      <div class="agent-cell-body">
+                        <div class="name">Orchestrator</div>
+                        <div class="note">Coordination overhead across the run.</div>
+                      </div>
+                    </div>
+                  </td>
+                  <td class="num">
+                    <span class="metric-actual">1m 42s</span>
+                    <span class="metric-expected">/ 1m 30s est.</span>
+                    <span class="delta-tag over">+12s (+13%)</span>
+                  </td>
+                  <td class="num">
+                    <span class="metric-actual">4.3k</span>
+                    <span class="metric-expected">/ 4.0k est.</span>
+                    <span class="delta-tag flat">+0.3k (+8%)</span>
+                  </td>
+                </tr>
+                <tr>
+                  <td>
+                    <div class="agent-cell st-completed">
+                      <span class="status-dot"></span>
+                      <div class="agent-cell-body">
+                        <div class="name">backend_planner</div>
+                        <div class="note">Designed the auth module layout.</div>
+                      </div>
+                    </div>
+                  </td>
+                  <td class="num">
+                    <span class="metric-actual">2m 04s</span>
+                    <span class="metric-expected">/ 3m 00s est.</span>
+                    <span class="delta-tag under">&minus;56s (&minus;31%)</span>
+                  </td>
+                  <td class="num">
+                    <span class="metric-actual">9.8k</span>
+                    <span class="metric-expected">/ 12.0k est.</span>
+                    <span class="delta-tag under">&minus;2.2k (&minus;18%)</span>
+                  </td>
+                </tr>
+                <tr>
+                  <td>
+                    <div class="agent-cell st-completed">
+                      <span class="status-dot"></span>
+                      <div class="agent-cell-body">
+                        <div class="name">auth_scaffold_worker</div>
+                        <div class="note trouble-note">Hit a trouble state 3m 41s in (needed a decision on signing-key permissions). Dana approved it, and the agent finished from there.</div>
+                      </div>
+                    </div>
+                  </td>
+                  <td class="num">
+                    <span class="metric-actual">7m 58s</span>
+                    <span class="metric-expected">/ 4m 00s est.</span>
+                    <span class="delta-tag over">+3m 58s (+99%)</span>
+                  </td>
+                  <td class="num">
+                    <span class="metric-actual">27.3k</span>
+                    <span class="metric-expected">/ 16.0k est.</span>
+                    <span class="delta-tag over">+11.3k (+71%)</span>
+                  </td>
+                </tr>
+                <tr>
+                  <td>
+                    <div class="agent-cell st-completed">
+                      <span class="status-dot"></span>
+                      <div class="agent-cell-body">
+                        <div class="name">token_refresh_worker</div>
+                        <div class="note">Refresh-token rotation logic.</div>
+                      </div>
+                    </div>
+                  </td>
+                  <td class="num">
+                    <span class="metric-actual">2m 12s</span>
+                    <span class="metric-expected">/ 2m 30s est.</span>
+                    <span class="delta-tag under">&minus;18s (&minus;12%)</span>
+                  </td>
+                  <td class="num">
+                    <span class="metric-actual">8.4k</span>
+                    <span class="metric-expected">/ 9.0k est.</span>
+                    <span class="delta-tag under">&minus;0.6k (&minus;7%)</span>
+                  </td>
+                </tr>
+                <tr class="total-row">
+                  <td>
+                    <div class="agent-cell-body">
+                      <div class="name">Total (completed work)</div>
+                    </div>
+                  </td>
+                  <td class="num">
+                    <span class="metric-actual">13m 56s</span>
+                    <span class="metric-expected">/ 11m 00s est.</span>
+                    <span class="delta-tag over">+2m 56s (+27%)</span>
+                  </td>
+                  <td class="num">
+                    <span class="metric-actual">49.8k</span>
+                    <span class="metric-expected">/ 41.0k est.</span>
+                    <span class="delta-tag over">+8.8k (+21%)</span>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- FR-22: cancelled work, kept separate from the totals above -->
+          <div class="cancelled-card">
+            <div class="section-heading">
+              <h2>Cancelled work</h2>
+              <span class="sub">excluded from totals above</span>
+            </div>
+            <div class="cancelled-row">
+              <span class="status-dot"></span>
+              <div class="cancelled-row-body">
+                <div class="name">jwt_test_writer</div>
+                <div class="reason">Dana cancelled this agent 1m 53s in. It turned out unnecessary once auth_scaffold_worker's own tests already covered the login flow.</div>
+                <div class="cancelled-figures">
+                  <div class="cancelled-figure">
+                    <div class="label">Elapsed before cancel</div>
+                    <div class="value">1m 53s</div>
+                  </div>
+                  <div class="cancelled-figure">
+                    <div class="label">Tokens spent</div>
+                    <div class="value">6.4k</div>
+                  </div>
+                  <div class="cancelled-figure">
+                    <div class="label">Est. if completed</div>
+                    <div class="value">3m 00s / 11.0k</div>
+                  </div>
+                </div>
+                <div class="not-counted-badge">Not counted toward completed-work totals</div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+        <div class="col-side">
+          <!-- FR-20: flight path replay -->
+          <div class="replay-panel">
+            <div class="section-heading">
+              <h2>Flight path</h2>
+            </div>
+            <span class="replay-badge"><span class="sq"></span>Replay — not live</span>
+
+            <div class="replay-legend">
+              <div class="legend-item"><span class="swatch" style="background:#27AE60"></span>completed</div>
+              <div class="legend-item"><span class="swatch" style="background:#9B9BAA"></span>cancelled</div>
+              <div class="legend-item"><span class="swatch" style="background:#FF8C42"></span>trouble (recovered)</div>
+            </div>
+
+            <div class="replay-timeline">
+
+              <div class="replay-node-row st-completed">
+                <div class="replay-connector"><span class="node-dot"></span><span class="stem"></span></div>
+                <div class="replay-card">
+                  <div class="replay-card-head">
+                    <span class="replay-card-name">Orchestrator</span>
+                    <span class="replay-status-chip"><span class="dot"></span>completed</span>
+                  </div>
+                  <div class="replay-card-role">main run coordinator</div>
+                  <div class="replay-token-row">
+                    <span class="replay-token-figures"><strong>4.3k</strong> / 4.0k est.</span>
+                    <span class="token-bar"><span style="width:100%"></span></span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="replay-node-row st-completed">
+                <div class="replay-connector"><span class="node-dot"></span><span class="stem"></span></div>
+                <div class="replay-card">
+                  <div class="replay-card-head">
+                    <span class="replay-card-name">backend_planner</span>
+                    <span class="replay-status-chip"><span class="dot"></span>completed</span>
+                  </div>
+                  <div class="replay-card-role">designed auth module layout</div>
+                  <div class="replay-token-row">
+                    <span class="replay-token-figures"><strong>9.8k</strong> / 12.0k est.</span>
+                    <span class="token-bar"><span style="width:82%"></span></span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="replay-node-row st-completed">
+                <div class="replay-connector"><span class="node-dot"></span><span class="stem"></span></div>
+                <div class="replay-card">
+                  <div class="replay-card-head">
+                    <span class="replay-card-name">auth_scaffold_worker</span>
+                    <span class="replay-status-chip"><span class="dot"></span>completed</span>
+                  </div>
+                  <div class="replay-card-role">scaffolded JWT auth code</div>
+                  <div class="replay-detour-tag"><span class="dot"></span>detoured through trouble, then recovered</div>
+                  <div class="replay-token-row">
+                    <span class="replay-token-figures"><strong>27.3k</strong> / 16.0k est.</span>
+                    <span class="token-bar over"><span style="width:100%"></span></span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="replay-node-row st-completed">
+                <div class="replay-connector"><span class="node-dot"></span><span class="stem"></span></div>
+                <div class="replay-card">
+                  <div class="replay-card-head">
+                    <span class="replay-card-name">token_refresh_worker</span>
+                    <span class="replay-status-chip"><span class="dot"></span>completed</span>
+                  </div>
+                  <div class="replay-card-role">refresh-token rotation</div>
+                  <div class="replay-token-row">
+                    <span class="replay-token-figures"><strong>8.4k</strong> / 9.0k est.</span>
+                    <span class="token-bar"><span style="width:93%"></span></span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="replay-node-row st-cancelled">
+                <div class="replay-connector"><span class="node-dot"></span></div>
+                <div class="replay-card" style="opacity:.8;">
+                  <div class="replay-card-head">
+                    <span class="replay-card-name">jwt_test_writer</span>
+                    <span class="replay-status-chip"><span class="dot"></span>cancelled</span>
+                  </div>
+                  <div class="replay-card-role">writes auth test suite — stopped by Dana, 1m 53s in</div>
+                  <div class="replay-token-row">
+                    <span class="replay-token-figures"><strong>6.4k</strong> spent, not counted</span>
+                    <span class="token-bar" style="background:#E4E1E8;"><span style="width:58%; background:#9B9BAA;"></span></span>
+                  </div>
+                </div>
+              </div>
+
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- FR-21: generated files changelog -->
+      <div class="card">
+        <div class="section-heading">
+          <h2>Generated files</h2>
+          <span class="sub">7 changed, 1 not written</span>
+        </div>
+
+        <table class="filelog">
+          <thead>
+            <tr>
+              <th style="width:34%;">File</th>
+              <th style="width:14%;">Change</th>
+              <th>Agent(s)</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><span class="file-path">src/auth/jwt.py</span></td>
+              <td><span class="change-badge created">Created</span></td>
+              <td><span class="agent-tag"><span class="dot"></span>auth_scaffold_worker</span></td>
+            </tr>
+            <tr>
+              <td><span class="file-path">src/auth/oauth2.py</span></td>
+              <td><span class="change-badge created">Created</span></td>
+              <td><span class="agent-tag"><span class="dot"></span>auth_scaffold_worker</span></td>
+            </tr>
+            <tr>
+              <td><span class="file-path">src/auth/token_refresh.py</span></td>
+              <td><span class="change-badge created">Created</span></td>
+              <td><span class="agent-tag"><span class="dot"></span>token_refresh_worker</span></td>
+            </tr>
+            <tr>
+              <td><span class="file-path">src/routes/auth_routes.py</span></td>
+              <td><span class="change-badge modified">Modified</span></td>
+              <td>
+                <span class="agent-tag"><span class="dot"></span>backend_planner</span><span class="agent-tag"><span class="dot"></span>auth_scaffold_worker</span>
+              </td>
+            </tr>
+            <tr>
+              <td><span class="file-path">pyproject.toml</span></td>
+              <td><span class="change-badge modified">Modified</span></td>
+              <td>
+                <span class="agent-tag"><span class="dot"></span>auth_scaffold_worker</span><span class="agent-tag"><span class="dot"></span>token_refresh_worker</span>
+              </td>
+            </tr>
+            <tr>
+              <td><span class="file-path">config/settings.py</span></td>
+              <td><span class="change-badge modified">Modified</span></td>
+              <td><span class="agent-tag"><span class="dot"></span>backend_planner</span></td>
+            </tr>
+            <tr>
+              <td><span class="file-path">src/auth/legacy_session.py</span></td>
+              <td><span class="change-badge deleted">Deleted</span></td>
+              <td><span class="agent-tag"><span class="dot"></span>auth_scaffold_worker</span></td>
+            </tr>
+            <tr class="not-created">
+              <td><span class="file-path muted">tests/test_jwt.py</span></td>
+              <td><span class="change-badge not-created">Not created</span></td>
+              <td><span class="agent-tag cancelled-author"><span class="dot"></span>jwt_test_writer — cancelled before this file was written</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+</body>
+</html>
