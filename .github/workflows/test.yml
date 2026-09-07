@@ -1,0 +1,278 @@
+# Test Pipeline for claude-wrapper (fullstack: FastAPI backend + Next.js
+# frontend + a root-level Playwright E2E/API suite).
+#
+# Generated via bmad-testarch-ci, adapted from its github-actions-template.yaml:
+# no matrix sharding (the current suite is small — 50 backend tests, 2 E2E
+# tests — sharding would spin up parallel jobs to do near-nothing each;
+# revisit once the suite grows), burn-in iteration count halved from the
+# template's default 10 for the same reason, and jobs added/split for the
+# Python backend the template (Node-only) didn't cover.
+
+name: Test Pipeline
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Weekly burn-in on Sundays at 2 AM UTC
+    - cron: "0 2 * * 0"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Lint stage — frontend only; no backend linter is configured yet
+  # (deferred-work.md), so there's nothing to run for backend/ here.
+  lint:
+    name: Lint (frontend)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: ".nvmrc"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Run linter
+        working-directory: frontend
+        run: npm run lint
+
+  # Frontend build — separate from lint so a build/type error is reported
+  # distinctly from a lint error.
+  frontend-build:
+    name: Frontend build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: ".nvmrc"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build
+        working-directory: frontend
+        run: npm run build
+
+  # Backend test — pytest, no live Anthropic API calls (Settings Router
+  # tests mock the Anthropic client; see backend/tests/brain/settings_router/).
+  backend-test:
+    name: Backend tests (pytest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: "backend/uv.lock"
+
+      - name: Install dependencies
+        working-directory: backend
+        run: uv sync
+
+      - name: Run pytest
+        working-directory: backend
+        run: uv run pytest -v --cov=. --cov-report=term-missing
+
+  # E2E/API test — the root Playwright suite. playwright.config.ts's
+  # webServer array starts both the frontend dev server and the backend
+  # uvicorn server itself (reuseExistingServer is false under CI=true, which
+  # GitHub Actions sets automatically), so this job just needs both apps'
+  # dependencies installed, not the apps already running.
+  e2e-test:
+    name: E2E tests (Playwright)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [lint, frontend-build, backend-test]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: ".nvmrc"
+          cache: "npm"
+          cache-dependency-path: |
+            package-lock.json
+            frontend/package-lock.json
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: "backend/uv.lock"
+
+      - name: Install root (Playwright suite) dependencies
+        run: npm ci
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: uv sync
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-playwright-
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Run E2E tests
+        run: npm run test:e2e
+
+      - name: Upload test results
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-results
+          path: |
+            test-results/
+            playwright-report/
+          retention-days: 30
+
+  # Burn-in — flaky-test detection. Only on PRs and the weekly schedule, not
+  # every push to main. 5 iterations (halved from the template's 10): the
+  # current suite runs in ~5s, so even 10 would be cheap, but 5 is enough to
+  # catch flakiness in test infra/webServer startup at this suite size.
+  burn-in:
+    name: Burn-in (flaky detection)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: e2e-test
+    if: github.event_name == 'pull_request' || github.event_name == 'schedule'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: ".nvmrc"
+          cache: "npm"
+          cache-dependency-path: |
+            package-lock.json
+            frontend/package-lock.json
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: "backend/uv.lock"
+
+      - name: Install root (Playwright suite) dependencies
+        run: npm ci
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: uv sync
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('package-lock.json') }}
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Run burn-in loop (5 iterations)
+        run: |
+          echo "Starting burn-in loop - detecting flaky tests"
+          for i in {1..5}; do
+            echo "---- Burn-in iteration $i/5 ----"
+            npm run test:e2e || exit 1
+          done
+          echo "Burn-in complete - no flaky tests detected"
+
+      - name: Upload burn-in failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: burn-in-failures
+          path: |
+            test-results/
+            playwright-report/
+          retention-days: 30
+
+  # Report — aggregate status into the job summary.
+  report:
+    name: Test report
+    runs-on: ubuntu-latest
+    needs: [lint, frontend-build, backend-test, e2e-test, burn-in]
+    if: always()
+
+    steps:
+      - name: Generate summary
+        run: |
+          {
+            echo "## Test Execution Summary"
+            echo ""
+            echo "- **Lint**: ${{ needs.lint.result }}"
+            echo "- **Frontend build**: ${{ needs.frontend-build.result }}"
+            echo "- **Backend tests**: ${{ needs.backend-test.result }}"
+            echo "- **E2E tests**: ${{ needs.e2e-test.result }}"
+            echo "- **Burn-in**: ${{ needs.burn-in.result }}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "${{ needs.burn-in.result }}" == "failure" ]; then
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "**Flaky tests detected** - review burn-in artifacts" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+# ============================================================================
+# EXTENSION PATTERNS — Script Injection Prevention
+# ============================================================================
+# This workflow has no workflow_call/workflow_dispatch inputs today, so
+# nothing here interpolates ${{ inputs.* }} or ${{ github.event.* }} directly.
+# If this is ever extended into a reusable workflow or manual dispatch:
+#
+# KEY PRINCIPLE: inputs must be DATA, not COMMANDS. Route ${{ inputs.* }}
+# through an env: intermediary and reference as a quoted "$ENV_VAR" inside a
+# fixed run: command — never interpolate ${{ inputs.* }} directly into a
+# run: block, and never accept a command-shaped input (e.g. an
+# "install-command" input) that gets executed as shell code, even via env:.
+#
+#   # ✅ SAFE
+#   - env:
+#       TEST_GREP: ${{ inputs.test-grep }}
+#     run: npx playwright test --grep "$TEST_GREP"
+#
+#   # ❌ NEVER
+#   - run: npx playwright test --grep "${{ inputs.test-grep }}"
+# ============================================================================
