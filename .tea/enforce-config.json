@@ -1,0 +1,10 @@
+{
+  "testGlobs": ["tests/**/*.spec.{ts,js}", "backend/tests/**/test_*.py", "backend/**/*_test.py"],
+  "pactConfigGlobs": [],
+  "excludeGlobs": [],
+  "disabledRules": [],
+  "maxFileLines": 1000,
+  "stopScanWindowSeconds": 900,
+  "maxScannedFiles": 5000,
+  "hookSha256": "f2ede9d399358d8810c660a29590f0c1683f7164bb3199038d26787f8324491c"
+}

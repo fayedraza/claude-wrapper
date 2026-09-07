@@ -19,6 +19,9 @@ __pycache__/
 .venv/
 venv/
 *.egg-info/
+.coverage
+.pytest_cache/
+htmlcov/
 
 # Env / secrets
 .env
@@ -31,3 +34,14 @@ venv/
 
 # BMad Claude Code runtime state
 .claude/scheduled_tasks.lock
+
+# Playwright
+/test-results/
+/playwright-report/
+/blob-report/
+tests/.auth-sessions/
+_bmad-output/test-artifacts/playwright-junit.xml
+# Defensive: @seontechnologies/playwright-utils's configureAuthSession() has
+# ignored a custom storage path before and written here instead (upstream
+# bug — see tests/global-setup.ts).
+/.auth/

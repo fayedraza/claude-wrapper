@@ -12,3 +12,18 @@ dependencies = [
     "starlette>=1.0.1",
     "uvicorn[standard]>=0.34.0",
 ]
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1",
+    "pytest>=9.1.1",
+    "pytest-cov>=7.1.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-ra"
+markers = [
+    "integration: needs a real dependency (e.g. Redis via docker compose), not just pure unit logic",
+]
