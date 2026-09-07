@@ -52,6 +52,16 @@ curl -sf localhost:8000/health
 # -> {"status":"ok"}
 ```
 
+### Settings Router (`/api/settings/propose`)
+
+The Settings feature classifies natural-language requests via Claude
+(`anthropic.Anthropic()`, env-based auth) and needs credentials to work
+locally. Export `ANTHROPIC_API_KEY` before starting the backend (see
+`backend/.env.example` for the variable name), or run `ant auth login`
+instead. Without either, a Settings request fails with a `502
+settings.llm_error` response — the gateway still surfaces the app's error
+envelope, not a crash, it just has no credentials to call Claude with.
+
 ## 3. Frontend (Next.js)
 
 Install dependencies and run the dev server from `frontend/`:
