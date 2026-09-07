@@ -43,7 +43,8 @@ export interface ErrorEnvelope {
 // Story 1.3 (FR-3): the "Currently configured" chip vocabulary from the UX
 // mock -- deliberately distinct, informal, and unrelated to TargetCategory
 // above. Never conflate the two or render target_category in a summary row.
-export type ConfigKind = "rule" | "agent" | "mcp";
+// Story 1.4 adds "file" -- a real permission-grant row can now be either kind.
+export type ConfigKind = "rule" | "agent" | "mcp" | "file";
 
 export interface ConfigSummaryItem {
   kind: ConfigKind;
@@ -57,7 +58,9 @@ export interface CurrentConfiguration {
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
 
-async function readErrorMessage(response: Response, fallback: string): Promise<string> {
+// Exported so `permission-grants-api.ts` (Story 1.4) can surface the same
+// error envelope shape without redefining this logic.
+export async function readErrorMessage(response: Response, fallback: string): Promise<string> {
   try {
     const body = (await response.json()) as Partial<ErrorEnvelope>;
     return body.message ?? fallback;

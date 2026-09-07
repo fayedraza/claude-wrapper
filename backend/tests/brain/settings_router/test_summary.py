@@ -151,6 +151,51 @@ def test_multiple_agents_are_all_listed_sorted(claude_dir: Path) -> None:
 # ---- permission grants ------------------------------------------------------
 
 
+def test_real_schema_file_grant_renders_correct_kind_chip_and_target(claude_dir: Path) -> None:
+    """Story 1.4's real schema (`{id, kind: "file"|"mcp", target}`) must render
+    the actual kind chip and target text, not a hardcoded "mcp" placeholder
+    (Acceptance Criteria)."""
+    (claude_dir / "settings.local.json").write_text(
+        json.dumps({"permissionGrants": [{"id": "abc123", "kind": "file", "target": "src/config/secrets.json"}]}),
+        encoding="utf-8",
+    )
+
+    result = get_current_configuration(claude_dir)
+
+    assert len(result.items) == 1
+    item = result.items[0]
+    assert item.kind == "file"
+    assert item.text == "src/config/secrets.json"
+    assert item.path == ".claude/settings.local.json"
+
+
+def test_real_schema_mcp_grant_renders_correct_kind_chip_and_target(claude_dir: Path) -> None:
+    (claude_dir / "settings.local.json").write_text(
+        json.dumps({"permissionGrants": [{"id": "def456", "kind": "mcp", "target": "filesystem-mcp"}]}),
+        encoding="utf-8",
+    )
+
+    result = get_current_configuration(claude_dir)
+
+    assert len(result.items) == 1
+    assert result.items[0].kind == "mcp"
+    assert result.items[0].text == "filesystem-mcp"
+
+
+def test_grants_written_via_add_grant_are_reflected_in_the_summary(claude_dir: Path) -> None:
+    """End-to-end: a grant written through `grants.add_grant()` (Story 1.4's
+    real writer) shows up correctly through the read-only summary."""
+    from brain.settings_router.grants import add_grant
+
+    add_grant(claude_dir, "file", "src/secrets.json")
+
+    result = get_current_configuration(claude_dir)
+
+    assert len(result.items) == 1
+    assert result.items[0].kind == "file"
+    assert result.items[0].text == "src/secrets.json"
+
+
 def test_no_permission_grants_key_yields_no_grant_rows(claude_dir: Path) -> None:
     """Today's reality: settings.json has no `permissionGrants` key (e.g. only
     a `hooks` block) -- the section is correctly empty, not an error."""

@@ -89,3 +89,31 @@ Findings surfaced incidentally during review that are pre-existing or out of sco
 - source_spec: none
   summary: Not adopting `bmad-loop` (the autonomous multi-session dev/review orchestrator) for now — staying with the interactive `bmad-build` flow used for Stories 1.1–1.3.
   evidence: Investigated what setup would actually involve: a separate `uv tool install` from GitHub, `bmad-loop init`/`validate`, and a hard prerequisite this project doesn't have yet (`sprint-status.yaml`, which needs `bmad-sprint-planning` to have run). More importantly, spawned dev/review sessions run under a "never-ask" automation rule — the kind of live judgment calls made interactively this session (model choice, permission-grant schema handling, etc.) would either need to be pre-decided in the spec/policy or would trigger a CRITICAL escalation pausing the whole run for a separate `/bmad-loop-resolve` session. The human explicitly declined the tradeoff (less steering per story in exchange for unattended throughput) after this was explained. Revisit once specs/policy are stable enough that escalations would be rare, or if throughput becomes the binding constraint instead of judgment calls.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-4-permission-manager.md`
+  summary: `grants.py`'s read-modify-write of `settings.local.json` (`add_grant`/`revoke_grant`) has no file locking or atomic write (temp-file-plus-rename) — two concurrent writers (or a race with Claude Code itself writing the file) can clobber each other's changes.
+  evidence: Confirmed by review: `_write_settings_local()` does a plain `write_text()` after a plain `read_text()`, no lock acquired in between. Matches the existing pattern in `apply.py`'s `apply_action()` (also no locking), so this isn't a regression specific to this story, and the app is designed for a single local user — but worth a real fix (e.g. `filelock`) if concurrent access ever becomes plausible.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-4-permission-manager.md`
+  summary: Grant deduplication in `add_grant()` compares `target` via raw string equality after only trimming whitespace — no path normalization, so `src/a.json` and `./src/a.json` (or different path separators) are treated as distinct grants for the same real resource.
+  evidence: `backend/brain/settings_router/grants.py`'s `add_grant()` loop: `existing.target == trimmed`. Targets are documented as opaque identifiers (Design Notes) so this may be intentional, but it means a user can end up with duplicate-looking grants that "mean" the same file if they type the path differently each time.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-4-permission-manager.md`
+  summary: `_parse_grants()` silently drops any `permissionGrants` entry that fails to validate against the real `PermissionGrant` schema, and the next `add_grant`/`revoke_grant` call re-serializes only the surviving entries — so a legacy/hand-authored freeform grant (the kind Story 1.3's summary reader still displays via its text/description/name fallback) is permanently deleted the next time the new UI adds or revokes anything.
+  evidence: `backend/brain/settings_router/grants.py`: `_parse_grants()` skips non-conforming dicts via `try/except ValueError: continue`, and both `add_grant`/`revoke_grant` write back `[g.model_dump() for g in grants]` — only ever the parsed survivors. Confirmed by reading the code path; not reproduced against real data since no legacy freeform grants exist in this repo today.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-4-permission-manager.md`
+  summary: `revoke_grant()` treats an unknown or already-revoked id as an error (404), while `add_grant()` for the same kind+target is explicitly idempotent (200, no error) — a client that retries a `DELETE` after a dropped response (the first request actually succeeded server-side) gets an unexpected 404 instead of a no-op success.
+  evidence: `backend/brain/settings_router/grants.py`: `revoke_grant()` raises `PermissionGrantNotFoundError` whenever the id isn't found, with no distinction between "never existed" and "already revoked by a previous, unacknowledged call." Surfaced by review; no test exercises the retry-after-timeout scenario specifically. Worth a deliberate decision (make revoke idempotent too, or document the asymmetry) rather than inheriting it by default.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-4-permission-manager.md`
+  summary: `PermissionGrant.target` (the Pydantic model used on the *read* path, via `model_validate` in `_parse_grants()`) has no length or emptiness constraint, unlike `add_grant()`'s own trim/length validation on the *write* path — a hand-edited `settings.local.json` with an empty-string or oversized target would be parsed and returned as-is by `list_grants()`/`GET`.
+  evidence: `backend/brain/settings_router/models.py`: `PermissionGrant.target: str = Field(description=...)` carries no `min_length`/`max_length`. `add_grant()`'s own checks (`grants.py`) only run on the write path, so they don't protect reads of externally-edited data.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-4-permission-manager.md`
+  summary: No upper bound exists on how many grants a single `settings.local.json` can accumulate — `add_grant()` has no total-count cap.
+  evidence: Surfaced by review; low real risk for a single-local-user tool, but nothing currently prevents unbounded growth of the `permissionGrants` list from a buggy or looping client.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-4-permission-manager.md`
+  summary: The new Permission Manager frontend (`PermissionManagerDrawer.tsx`, `PermissionGrantRow.tsx`, `permission-grants-api.ts`) ships with zero automated tests, same as `SettingsDrawer.tsx` before it.
+  evidence: Confirmed via the verification-gap reviewer: no test runner, config, or `*.test.*`/`*.spec.*` file exists anywhere under `frontend/` (matches the pre-existing gap already logged against Story 1.2's Reject-button row). Not a regression this story introduced, but this story doubles the untested UI surface area — worth prioritizing once `bmad-testarch-automate` runs after Epic 1, per the existing plan.

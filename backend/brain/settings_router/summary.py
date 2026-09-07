@@ -24,7 +24,7 @@ from typing import Any
 
 import yaml
 
-from .models import ConfigSummaryItem, CurrentConfiguration
+from .models import ConfigKind, ConfigSummaryItem, CurrentConfiguration
 from .router import display_path
 
 _SETTINGS_FILENAMES = ("settings.json", "settings.local.json")
@@ -144,12 +144,10 @@ def _permission_grant_items(claude_dir: Path) -> list[ConfigSummaryItem]:
     """Show a row per entry under `permissionGrants` in `settings.json`/
     `settings.local.json`, only when that key is present.
 
-    Boundaries/Never: this deliberately does not invent a permission-grant
-    schema -- it only checks for the key's presence (absent today, so this
-    always returns `[]` in practice) and, when present, renders whatever
-    generic text it can find on each entry. Story 1.4 owns the real schema;
-    once it writes real data under this same key, this should pick it up
-    automatically without needing to change.
+    Still reads both files for display (Design Notes: unchanged from Story
+    1.3) even though `grants.py` (Story 1.4) only ever writes
+    `settings.local.json` -- `settings.json` could in principle carry a
+    hand-authored `permissionGrants` entry too, and this is read-only.
     """
     items: list[ConfigSummaryItem] = []
     for filename in _SETTINGS_FILENAMES:
@@ -173,12 +171,29 @@ def _permission_grant_items(claude_dir: Path) -> list[ConfigSummaryItem]:
 
         path_display = display_path(claude_dir, settings_path)
         for grant in grants:
-            items.append(ConfigSummaryItem(kind="mcp", text=_grant_text(grant), path=path_display))
+            items.append(ConfigSummaryItem(kind=_grant_kind(grant), text=_grant_text(grant), path=path_display))
     return items
 
 
-def _grant_text(grant: Any) -> str:
+def _grant_kind(grant: Any) -> ConfigKind:
+    """Story 1.4's real schema is `{id, kind: "file"|"mcp", target}` -- render
+    the real `kind` when present. Falls back to "mcp" for a freeform/legacy
+    entry with no recognizable `kind` (never crash on one)."""
     if isinstance(grant, dict):
+        kind = grant.get("kind")
+        if kind in ("file", "mcp"):
+            return kind
+    return "mcp"
+
+
+def _grant_text(grant: Any) -> str:
+    """Story 1.4's real schema renders `target` verbatim. Falls back to the
+    old freeform `text`/`description`/`name` heuristics, then a generic
+    placeholder, for any entry that predates the real schema."""
+    if isinstance(grant, dict):
+        target = grant.get("target")
+        if isinstance(target, str) and target:
+            return target
         candidate = grant.get("text") or grant.get("description") or grant.get("name")
         if candidate:
             return str(candidate)

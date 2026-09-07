@@ -6,8 +6,12 @@ natural-language request into proposed `.claude/` changes without writing
 anything; `POST /api/settings/apply` writes exactly one approved change.
 Story 1.3 adds `GET /api/settings/current` (FR-3): a strictly read-only
 summary of what's already configured in `.claude/`, walked fresh on every
-request. WebSocket/SSE handlers and Redis-mirror reads (AD-9) are built in
-later stories -- see `_bmad-output/planning-artifacts/architecture/architecture-claude-wrapper-2026-08-30/ARCHITECTURE-SPINE.md`.
+request. Story 1.4 adds the Permission Manager surface (FR-6 + the standing
+half of FR-5): `GET/POST /api/permission-grants` and
+`DELETE /api/permission-grants/{id}`, reading/writing only
+`.claude/settings.local.json`. WebSocket/SSE handlers and Redis-mirror reads
+(AD-9) are built in later stories -- see
+`_bmad-output/planning-artifacts/architecture/architecture-claude-wrapper-2026-08-30/ARCHITECTURE-SPINE.md`.
 """
 
 from pathlib import Path
@@ -19,7 +23,21 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from brain.settings_router.apply import apply_action
-from brain.settings_router.models import CurrentConfiguration, SettingAction, SettingsRouterOutput
+from brain.settings_router.grants import (
+    PermissionGrantNotFoundError,
+    PermissionGrantValidationError,
+    add_grant,
+    list_grants,
+    revoke_grant,
+)
+from brain.settings_router.models import (
+    AddPermissionGrantRequest,
+    CurrentConfiguration,
+    PermissionGrant,
+    PermissionGrantsList,
+    SettingAction,
+    SettingsRouterOutput,
+)
 from brain.settings_router.router import SettingsPathError, classify_request
 from brain.settings_router.summary import get_current_configuration
 from gateway.errors import ErrorEnvelope
@@ -88,6 +106,24 @@ async def handle_os_error(request: Request, exc: OSError) -> JSONResponse:
     )
 
 
+@app.exception_handler(PermissionGrantValidationError)
+async def handle_permission_grant_validation_error(request: Request, exc: PermissionGrantValidationError) -> JSONResponse:
+    # I/O matrix: "Add with empty/whitespace target -- Rejected, 400 envelope".
+    return JSONResponse(
+        status_code=400,
+        content=ErrorEnvelope(error_code="permission_grants.invalid_target", message=str(exc)).model_dump(),
+    )
+
+
+@app.exception_handler(PermissionGrantNotFoundError)
+async def handle_permission_grant_not_found_error(request: Request, exc: PermissionGrantNotFoundError) -> JSONResponse:
+    # I/O matrix: "Revoke unknown/already-revoked id -- Error shown, list re-fetches", 404 envelope.
+    return JSONResponse(
+        status_code=404,
+        content=ErrorEnvelope(error_code="permission_grants.not_found", message=str(exc)).model_dump(),
+    )
+
+
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
@@ -130,3 +166,36 @@ def apply_settings(
     """
     apply_action(claude_dir, action)
     return {"status": "applied", "file_path": action.file_path, "action": action.action}
+
+
+@app.get("/api/permission-grants", response_model=PermissionGrantsList)
+def get_permission_grants(claude_dir: Path = Depends(get_claude_dir)) -> PermissionGrantsList:
+    """FR-6: list every grant currently persisted in `.claude/settings.local.json`.
+
+    No grants yet -- an empty list, friendly empty state (I/O matrix), never
+    an error.
+    """
+    return list_grants(claude_dir)
+
+
+@app.post("/api/permission-grants", response_model=PermissionGrant)
+def create_permission_grant(
+    payload: AddPermissionGrantRequest,
+    claude_dir: Path = Depends(get_claude_dir),
+) -> PermissionGrant:
+    """FR-6: add a grant anytime, no run required.
+
+    Idempotent for an already-granted `kind`+`target` pair -- the existing
+    grant is returned, not duplicated.
+    """
+    return add_grant(claude_dir, payload.kind, payload.target)
+
+
+@app.delete("/api/permission-grants/{grant_id}")
+def delete_permission_grant(
+    grant_id: str,
+    claude_dir: Path = Depends(get_claude_dir),
+) -> dict[str, str]:
+    """FR-6: revoke one grant by id, removing it from `.claude/settings.local.json`."""
+    revoke_grant(claude_dir, grant_id)
+    return {"status": "revoked", "id": grant_id}

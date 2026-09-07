@@ -63,7 +63,8 @@ class SettingsRouterOutput(BaseModel):
 # mock (key-settings.html's `.config-kind.*`) -- deliberately distinct,
 # informal, and unrelated to `TargetCategory` above. Never conflate the two
 # or render `target_category` in a "Currently configured" row.
-ConfigKind = Literal["rule", "agent", "mcp"]
+# Story 1.4 adds "file" -- a real permission-grant row can now be either kind.
+ConfigKind = Literal["rule", "agent", "mcp", "file"]
 
 
 class ConfigSummaryItem(BaseModel):
@@ -78,3 +79,37 @@ class CurrentConfiguration(BaseModel):
     """Top-level response for `GET /api/settings/current`."""
 
     items: list[ConfigSummaryItem] = Field(default_factory=list)
+
+
+# Story 1.4 (FR-6): flat per-resource permission grants -- one row per
+# resource (a file path or an MCP server name), never per-action rules.
+# Persisted only under `.claude/settings.local.json`'s `permissionGrants`
+# key (Boundaries: never `settings.json`, Claude Code's own reserved file).
+PermissionGrantKind = Literal["file", "mcp"]
+
+
+class PermissionGrant(BaseModel):
+    """One persisted grant: `{id, kind, target}`."""
+
+    id: str = Field(description="Server-generated identifier, stable across reads/writes.")
+    kind: PermissionGrantKind
+    target: str = Field(
+        description=(
+            "Opaque identifier -- a file path or an MCP server name. Never "
+            "validated for existence/reachability (Design Notes), only for "
+            "non-empty-after-trim and a generous max length."
+        )
+    )
+
+
+class PermissionGrantsList(BaseModel):
+    """Top-level response for `GET /api/permission-grants`."""
+
+    grants: list[PermissionGrant] = Field(default_factory=list)
+
+
+class AddPermissionGrantRequest(BaseModel):
+    """Request body for `POST /api/permission-grants`."""
+
+    kind: PermissionGrantKind
+    target: str
