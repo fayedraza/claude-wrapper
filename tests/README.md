@@ -53,14 +53,14 @@ Beyond what the hook catches:
 
 ## CI integration
 
-Not yet wired into a CI workflow — that's `bmad-testarch-ci`'s job, not this one. `playwright.config.ts` is already CI-aware (`forbidOnly`, retries, worker count keyed off `process.env.CI`), and the `webServer` array's `reuseExistingServer: !process.env.CI` means CI should start both dev servers explicitly in the workflow rather than relying on this config to do it.
+`.github/workflows/test.yml` runs on every push/PR to `main` (plus a weekly Sunday burn-in): `lint` (frontend), `frontend-build`, `backend-test` (pytest), then `e2e-test` (this suite — `reuseExistingServer: !process.env.CI` means the `webServer` array starts both dev servers itself under CI, it doesn't expect them already running), then `burn-in` (5 iterations, PRs + schedule only) and a `report` job that aggregates status into the job summary. No secrets are required today — neither current E2E test exercises the live Anthropic API (that's only called in mocked pytest tests); a secret will be needed once an E2E test does. No sharding or diff-based burn-in selection yet — the current suite (50 backend tests, 2 E2E tests) is too small for either to pay off; revisit as it grows.
 
 ## Troubleshooting
 
 - **`Cannot find module 'dotenv'`** — `@seontechnologies/playwright-utils`'s `auth-session` module needs `dotenv` at runtime but only declares it as its own devDependency upstream. It's already added directly to the root `package.json`; if this recurs after a lockfile reset, re-add it.
 - **A UI test fails immediately with an `auth-provider.ts` TODO error** — you (or a merge) added `authFixture` back into `merged-fixtures.ts`. Don't, until `auth-provider.ts`'s `manageAuthToken` TODO is resolved — see that file's header comment for why.
 - **`npm run test:e2e` hangs waiting for a server** — the `webServer` array expects `frontend/` (`npm run dev`) and `backend/` (`uv run uvicorn gateway.main:app --port 8000`) to be startable from a clean checkout. Confirm both work standalone first.
-- **Sample UI test fails on title/heading** — `home-page.spec.ts` asserts against the *stock* `create-next-app` scaffold. The moment `frontend/app/page.tsx` changes, update or replace this sample — it's a reference shape, not permanent coverage.
+- **Sample UI test fails on title/button/dialog** — `home-page.spec.ts` asserts against the real app shell (`frontend/app/page.tsx`, Story 1.2). The moment that shell changes further, update this sample — it's a reference shape, not permanent coverage.
 - **`make test-integration` exits with code 5** — that's pytest's "no tests collected" code, not a failure. No test is marked `@pytest.mark.integration` yet; correct until one exists.
 
 ## Knowledge base
