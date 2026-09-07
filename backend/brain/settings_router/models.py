@@ -57,3 +57,24 @@ class SettingsRouterOutput(BaseModel):
         )
     )
     updates: list[SettingAction] = Field(default_factory=list)
+
+
+# Story 1.3 (FR-3): the "Currently configured" chip vocabulary from the UX
+# mock (key-settings.html's `.config-kind.*`) -- deliberately distinct,
+# informal, and unrelated to `TargetCategory` above. Never conflate the two
+# or render `target_category` in a "Currently configured" row.
+ConfigKind = Literal["rule", "agent", "mcp"]
+
+
+class ConfigSummaryItem(BaseModel):
+    """One read-only row in the "Currently configured" summary."""
+
+    kind: ConfigKind
+    text: str = Field(description="One-line description (Design Notes heuristics per kind).")
+    path: str = Field(description="Display path, e.g. '.claude/rules/testing.md'.")
+
+
+class CurrentConfiguration(BaseModel):
+    """Top-level response for `GET /api/settings/current`."""
+
+    items: list[ConfigSummaryItem] = Field(default_factory=list)

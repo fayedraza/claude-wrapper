@@ -57,3 +57,35 @@ Findings surfaced incidentally during review that are pre-existing or out of sco
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-2-submit-settings-request-and-approve.md`
   summary: `ProposedChangeCard`'s content preview has no truncation/max-height/collapse control, and "update" actions show only the new full content with no diff against the existing file.
   evidence: `frontend/components/settings/ProposedChangeCard.tsx`; a large generated file would blow out the card, and for updates there's no way to see exactly what's changing versus what already exists — both reduce how well the approval step actually conveys the change, though neither violates this story's AC.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-3-view-current-configuration.md`
+  summary: Permission grants have no defined on-disk schema anywhere in the docs (PRD FR-4/5/6 and ARCHITECTURE-SPINE.md AD-6 describe only behavior, no field names) — Story 1.3 deliberately shows an empty grants list rather than inventing one. Story 1.4 must define the real schema.
+  evidence: Confirmed by direct investigation across PRD/architecture/UX docs during Story 1.3 planning — nothing concrete exists. Story 1.3 only checks for a `permissionGrants` key in `settings.json`/`settings.local.json` (chosen specifically to not collide with Claude Code's own reserved `permissions` key, since this repo's `.claude/settings.json` is the same file real Claude Code reads and already has a `hooks` block it enforces) and shows nothing when absent. **Story 1.4 should write real grant data under that same `permissionGrants` key** so Story 1.3's reader picks it up automatically — verify that assumption holds once 1.4 is implemented, don't take it on faith. Specific open design question for 1.4: should a grant be a flat per-file toggle, or per-action like real Claude Code's own permission rules (`Read(pattern)`, `Edit(pattern)`, `Bash(pattern)`, etc.)? Raised by the human during Story 1.3 planning — FR-4's "itemized checklist of every file and MCP server" doesn't settle it either way.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-3-view-current-configuration.md`
+  summary: `_permission_grant_items()` concatenates grants from `settings.json` and `settings.local.json` with no de-duplication or precedence handling — the same grant appearing in both would render as two indistinguishable rows instead of reflecting a local-overrides-team precedence.
+  evidence: `backend/brain/settings_router/summary.py`; can't be meaningfully fixed without knowing what "the same grant" means (identity/equality semantics), which isn't defined anywhere since no grant schema exists yet (see the entry above) — Story 1.4's territory once the real schema lands.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-3-view-current-configuration.md`
+  summary: No pagination/size bound on the `GET /api/settings/current` response — a large `rules/`/`agents/` directory or many permission grants returns everything unbounded, with no truncation or "show more" in the drawer.
+  evidence: `backend/brain/settings_router/summary.py`, `frontend/components/settings/SettingsDrawer.tsx`; low risk at current scale (a single developer's local `.claude/`), same category as the existing deferred "no upper bound on SettingsRouterOutput.updates" item from Story 1.2.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-3-view-current-configuration.md`
+  summary: None of `frontend/lib/settings-api.ts`'s three client functions (`proposeSettingsChange`, `applySettingsChange`, `getCurrentConfiguration`) set a fetch timeout — a hung backend leaves the caller waiting indefinitely with no way to recover.
+  evidence: Systemic, not unique to this story's new `getCurrentConfiguration()` — applies equally to the two functions Story 1.2 already shipped. Worth fixing once, consistently, across all three rather than patching one in isolation.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-3-view-current-configuration.md`
+  summary: The new "Currently configured" fetch-on-open and refresh-after-apply logic in `SettingsDrawer.tsx` has no automated test coverage.
+  evidence: Same root cause as the already-logged Story 1.2 "Reject row" gap — no frontend component-test framework exists yet in this project, deliberately deferred to `bmad-testarch-automate` running after Epic 1 completes.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-3-view-current-configuration.md`
+  summary: `_grant_text()`'s fallback silently degrades any permission-grant entry shaped differently than expected to the generic string `"Permission grant"`, with no logging to notice when real Story 1.4 data starts falling into that bucket unexpectedly.
+  evidence: `backend/brain/settings_router/summary.py`; adding logging now would be inventing infrastructure — no logging convention exists anywhere else in this backend yet. Revisit alongside Story 1.4, once real grant data exists to actually fall into this fallback.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-3-view-current-configuration.md`
+  summary: Pre-existing bug (not part of this story's diff, confirmed out of scope by the reviewer that found it): `_read_claude_dir_context()` in `backend/brain/settings_router/router.py` (Story 1.2, used by `/api/settings/propose`) walks `.claude/` via `claude_dir.rglob("*")`, which silently swallows `PermissionError` while scanning a directory — the exact same class of bug this story's review found and fixed in `summary.py` (there, fixed by switching to `iterdir()`). A permission-denied subdirectory under `.claude/` would be silently omitted from the LLM's classification context instead of surfacing an error.
+  evidence: Verified directly: `Path.rglob("*")` over a `chmod 000` subdirectory returns without raising, simply omitting its contents. Worth fixing the same way (`iterdir()`-based traversal) when `router.py` is next touched.
+
+- source_spec: none
+  summary: Not adopting `bmad-loop` (the autonomous multi-session dev/review orchestrator) for now — staying with the interactive `bmad-build` flow used for Stories 1.1–1.3.
+  evidence: Investigated what setup would actually involve: a separate `uv tool install` from GitHub, `bmad-loop init`/`validate`, and a hard prerequisite this project doesn't have yet (`sprint-status.yaml`, which needs `bmad-sprint-planning` to have run). More importantly, spawned dev/review sessions run under a "never-ask" automation rule — the kind of live judgment calls made interactively this session (model choice, permission-grant schema handling, etc.) would either need to be pre-decided in the spec/policy or would trigger a CRITICAL escalation pausing the whole run for a separate `/bmad-loop-resolve` session. The human explicitly declined the tradeoff (less steering per story in exchange for unattended throughput) after this was explained. Revisit once specs/policy are stable enough that escalations would be rare, or if throughput becomes the binding constraint instead of judgment calls.
