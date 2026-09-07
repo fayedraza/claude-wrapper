@@ -1,0 +1,656 @@
+<title>Claude Wrapper — Color Theme Explorations</title>
+<meta charset="utf-8" />
+<style>
+  /* =========================================================================
+     GLOBAL / SHARED STRUCTURE
+     No JS, no network calls, no external fonts or images. System font stack.
+     Five theme variations, each rendered in a light AND dark mode pairing.
+     ========================================================================= */
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: #EDEDF1;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    color: #16161A;
+  }
+  .page-header {
+    max-width: 1440px;
+    margin: 0 auto;
+    padding: 40px 32px 8px;
+  }
+  .page-header h1 { margin: 0 0 6px; font-size: 24px; }
+  .page-header p { margin: 0; color: #555; font-size: 14px; max-width: 760px; line-height: 1.5; }
+
+  .variation {
+    max-width: 1440px;
+    margin: 0 auto;
+    padding: 28px 32px 44px;
+  }
+  .variation + .variation { border-top: 1px solid #DADAE0; }
+
+  .var-header { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
+  .var-header .var-index {
+    font-size: 12px; font-weight: 700; color: #999; letter-spacing: .08em;
+  }
+  .var-header h2 { margin: 0; font-size: 20px; }
+  .var-header .register { margin: 4px 0 0; color: #555; font-size: 13.5px; font-style: italic; width: 100%; }
+
+  .modes-row { display: flex; gap: 20px; flex-wrap: wrap; margin-top: 18px; }
+  .mode-panel {
+    flex: 1 1 470px;
+    min-width: 420px;
+    padding: 22px;
+    position: relative;
+    border: 1px solid rgba(0,0,0,.08);
+  }
+  .mode-tag {
+    position: absolute; top: 14px; right: 16px;
+    font-size: 10px; letter-spacing: .1em; text-transform: uppercase; opacity: .55;
+  }
+
+  .chip-row { display: flex; flex-wrap: wrap; gap: 6px; margin: 16px 0 20px; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 10.5px; padding: 5px 9px; line-height: 1.3;
+  }
+  .chip code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 10px; opacity: .8; }
+  .swatch { width: 12px; height: 12px; border-radius: 50%; flex: 0 0 auto; border: 1px solid rgba(0,0,0,.2); }
+
+  .task-banner { font-size: 12px; margin: 0 0 12px; opacity: .8; }
+  .task-banner strong { font-weight: 700; }
+
+  .dag { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 18px; }
+  .node { padding: 10px 12px; min-width: 152px; }
+  .node .name { font-weight: 600; font-size: 12px; margin-bottom: 5px; word-break: break-word; }
+  .node .state { font-size: 10px; text-transform: uppercase; letter-spacing: .06em; display: inline-flex; align-items: center; gap: 5px; font-weight: 600; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
+  .arrow { font-size: 16px; opacity: .45; }
+
+  .panel { padding: 14px 16px; }
+  .panel h4 { margin: 0 0 10px; font-size: 11px; text-transform: uppercase; letter-spacing: .07em; }
+  .perm-row { display: flex; align-items: center; gap: 8px; font-size: 12.5px; padding: 4px 0; }
+  .perm-row code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11.5px; }
+  .perm-row input { margin: 0; }
+  .approve-btn { margin-top: 12px; border: none; padding: 9px 18px; font-size: 12.5px; font-weight: 700; cursor: default; font-family: inherit; }
+
+  /* Generic variable-driven coloring shared by every theme */
+  .mode-panel { background: var(--bg); color: var(--text1); }
+  .chip { background: var(--surface); color: var(--text1); border: 1px solid rgba(127,127,127,.28); }
+  .node { background: var(--surface); color: var(--text1); border: 2px solid rgba(127,127,127,.25); }
+  .task-banner { color: var(--text2); }
+  .arrow { color: var(--text2); }
+  .panel { background: var(--surface); color: var(--text1); border: 1px solid rgba(127,127,127,.22); }
+  .panel h4 { color: var(--text2); }
+  .perm-row { color: var(--text1); }
+  .perm-row input[type="checkbox"] { accent-color: var(--accent); width: 14px; height: 14px; }
+  .approve-btn { background: var(--accent); color: #fff; }
+
+  .st-waiting_input { border-color: var(--waiting) !important; }
+  .st-waiting_input .dot { background: var(--waiting); }
+  .st-waiting_input .state { color: var(--waiting); }
+  .st-executing { border-color: var(--executing) !important; }
+  .st-executing .dot { background: var(--executing); }
+  .st-executing .state { color: var(--executing); }
+  .st-trouble { border-color: var(--trouble) !important; }
+  .st-trouble .dot { background: var(--trouble); }
+  .st-trouble .state { color: var(--trouble); }
+  .st-completed { border-color: var(--completed) !important; }
+  .st-completed .dot { background: var(--completed); }
+  .st-completed .state { color: var(--completed); }
+  .st-cancelled { border-color: var(--cancelled) !important; }
+  .st-cancelled .dot { background: var(--cancelled); }
+  .st-cancelled .state { color: var(--cancelled); }
+  .st-failed { border-color: var(--failed) !important; }
+  .st-failed .dot { background: var(--failed); }
+  .st-failed .state { color: var(--failed); }
+
+  /* =========================================================================
+     THEME 1 — "Flight Tracker"
+     Register: warm, optimistic, like a flight-tracker app watching your
+     plane land safely.
+     Light: bg #FFF8F0  surface #FFFFFF  accent #2D9CDB
+            text1 #1A1A2E  text2 #6B6B7D
+            waiting_input #F5A623  executing #2D9CDB  trouble #FF8C42
+            completed #27AE60  cancelled #9B9BAA  failed #E74C3C
+     Dark:  bg #1E1B2E  surface #2A2640  accent #5AB8F5
+            text1 #F5F0FF  text2 #B0A8C9
+            waiting_input #FFC15E  executing #5AB8F5  trouble #FF9A5C
+            completed #4ADE80  cancelled #8B84A8  failed #FF6B6B
+     ========================================================================= */
+  .t1 .mode-light {
+    --bg:#FFF8F0; --surface:#FFFFFF; --accent:#2D9CDB; --text1:#1A1A2E; --text2:#6B6B7D;
+    --waiting:#F5A623; --executing:#2D9CDB; --trouble:#FF8C42; --completed:#27AE60; --cancelled:#9B9BAA; --failed:#E74C3C;
+  }
+  .t1 .mode-dark {
+    --bg:#1E1B2E; --surface:#2A2640; --accent:#5AB8F5; --text1:#F5F0FF; --text2:#B0A8C9;
+    --waiting:#FFC15E; --executing:#5AB8F5; --trouble:#FF9A5C; --completed:#4ADE80; --cancelled:#8B84A8; --failed:#FF6B6B;
+  }
+  .t1 .mode-panel { border-radius: 20px; box-shadow: 0 6px 24px rgba(45,156,219,.10); }
+  .t1 .chip { border-radius: 999px; }
+  .t1 .node { border-radius: 16px; box-shadow: 0 2px 8px rgba(0,0,0,.05); }
+  .t1 .panel { border-radius: 16px; }
+  .t1 .approve-btn { border-radius: 10px; }
+  .t1 .var-header h2 { font-weight: 700; }
+
+  /* =========================================================================
+     THEME 2 — "Lab Notebook"
+     Register: crisp, clinical-but-friendly, like a well-kept lab notebook —
+     precise, legible, unhurried.
+     Light: bg #F4F6F5  surface #FFFFFF  accent #0F9B8E
+            text1 #16211E  text2 #5B6B67
+            waiting_input #D9A404  executing #0F9B8E  trouble #D97706
+            completed #1D9A6C  cancelled #8A98A5  failed #DC2626
+     Dark:  bg #17262A  surface #1F343A  accent #2DD4BF
+            text1 #E8F1F0  text2 #9FB4B0
+            waiting_input #FBBF24  executing #2DD4BF  trouble #FB923C
+            completed #34D399  cancelled #7C8F94  failed #F87171
+     ========================================================================= */
+  .t2 .mode-light {
+    --bg:#F4F6F5; --surface:#FFFFFF; --accent:#0F9B8E; --text1:#16211E; --text2:#5B6B67;
+    --waiting:#D9A404; --executing:#0F9B8E; --trouble:#D97706; --completed:#1D9A6C; --cancelled:#8A98A5; --failed:#DC2626;
+  }
+  .t2 .mode-dark {
+    --bg:#17262A; --surface:#1F343A; --accent:#2DD4BF; --text1:#E8F1F0; --text2:#9FB4B0;
+    --waiting:#FBBF24; --executing:#2DD4BF; --trouble:#FB923C; --completed:#34D399; --cancelled:#7C8F94; --failed:#F87171;
+  }
+  .t2 .mode-panel {
+    border-radius: 4px;
+    background-color: var(--bg);
+    background-image: repeating-linear-gradient(0deg, rgba(127,127,127,.09) 0, rgba(127,127,127,.09) 1px, transparent 1px, transparent 25px);
+  }
+  .t2 .chip { border-radius: 3px; }
+  .t2 .node { border-radius: 3px; border-width: 1px; }
+  .t2 .panel { border-radius: 3px; }
+  .t2 .approve-btn { border-radius: 3px; }
+  .t2 .var-header h2, .t2 .panel h4, .t2 .mode-tag { text-transform: uppercase; letter-spacing: .06em; }
+  .t2 .node .name { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+
+  /* =========================================================================
+     THEME 3 — "Editorial Desk"
+     Register: warm and unhurried, like a magazine feature — paper tones,
+     quiet authority.
+     Light: bg #FBF3E7  surface #FFFDF8  accent #C0392B
+            text1 #2B211A  text2 #7A6A5C
+            waiting_input #D4A017  executing #4A6FA5  trouble #E07A3F
+            completed #4B7F52  cancelled #A69C8F  failed #A83232
+     Dark:  bg #211A14  surface #2C2319  accent #E8875A
+            text1 #F5E9DA  text2 #C4B29E
+            waiting_input #E5B94E  executing #7FA3D1  trouble #F0955A
+            completed #7CAD82  cancelled #B8A896  failed #E07272
+     ========================================================================= */
+  .t3 .mode-light {
+    --bg:#FBF3E7; --surface:#FFFDF8; --accent:#C0392B; --text1:#2B211A; --text2:#7A6A5C;
+    --waiting:#D4A017; --executing:#4A6FA5; --trouble:#E07A3F; --completed:#4B7F52; --cancelled:#A69C8F; --failed:#A83232;
+  }
+  .t3 .mode-dark {
+    --bg:#211A14; --surface:#2C2319; --accent:#E8875A; --text1:#F5E9DA; --text2:#C4B29E;
+    --waiting:#E5B94E; --executing:#7FA3D1; --trouble:#F0955A; --completed:#7CAD82; --cancelled:#B8A896; --failed:#E07272;
+  }
+  .t3 .mode-panel { border-radius: 2px; padding: 28px; }
+  .t3 .chip { border-radius: 2px; border: 1px solid rgba(127,127,127,.3); }
+  .t3 .node {
+    border-radius: 0; border-width: 0; border-left-width: 4px; border-left-style: solid;
+    padding: 8px 0 8px 14px; background: transparent;
+  }
+  .t3 .panel { border-radius: 0; border: none; border-left: 4px solid var(--accent); padding: 10px 0 10px 18px; background: transparent; }
+  .t3 .approve-btn { border-radius: 0; text-transform: uppercase; letter-spacing: .06em; font-size: 11.5px; }
+  .t3 .var-header h2 { font-variant: small-caps; letter-spacing: .02em; font-size: 22px; }
+  .t3 .node .name { letter-spacing: .01em; }
+
+  /* =========================================================================
+     THEME 4 — "Mission Control"
+     Register: cool, dense, technical — a night-shift dashboard built for
+     people who need to read state at a glance, not a black/green terminal.
+     Dark (primary): bg #0B1120  surface #131B2E  accent #6366F1
+                      text1 #E2E8F0  text2 #8B96AB
+                      waiting_input #FBBF24  executing #38BDF8  trouble #FB7185
+                      completed #34D399  cancelled #64748B  failed #EF4444
+     Light (companion): bg #EEF2FF  surface #FFFFFF  accent #4F46E5
+                      text1 #1E1B3A  text2 #5C5A7A
+                      waiting_input #D97706  executing #0284C7  trouble #E11D48
+                      completed #059669  cancelled #64748B  failed #DC2626
+     ========================================================================= */
+  .t4 .mode-dark {
+    --bg:#0B1120; --surface:#131B2E; --accent:#6366F1; --text1:#E2E8F0; --text2:#8B96AB;
+    --waiting:#FBBF24; --executing:#38BDF8; --trouble:#FB7185; --completed:#34D399; --cancelled:#64748B; --failed:#EF4444;
+  }
+  .t4 .mode-light {
+    --bg:#EEF2FF; --surface:#FFFFFF; --accent:#4F46E5; --text1:#1E1B3A; --text2:#5C5A7A;
+    --waiting:#D97706; --executing:#0284C7; --trouble:#E11D48; --completed:#059669; --cancelled:#64748B; --failed:#DC2626;
+  }
+  .t4 .mode-panel { border-radius: 8px; padding: 18px; }
+  .t4 .chip { border-radius: 4px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  .t4 .node { border-radius: 6px; padding: 8px 10px; min-width: 132px; }
+  .t4 .node .name, .t4 .node .state { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  .t4 .node .state { font-size: 9.5px; }
+  .t4 .dag { gap: 4px; }
+  .t4 .arrow { font-size: 13px; }
+  .t4 .panel { border-radius: 6px; }
+  .t4 .approve-btn { border-radius: 4px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+
+  /* =========================================================================
+     THEME 5 — "Launch Party"
+     Register: bold, saturated, playful — energetic enough to make fixing a
+     JWT bug feel like a small celebration.
+     Light: bg #FCF7FF  surface #FFFFFF  accent #7C3AED
+            text1 #1F1233  text2 #6E6491
+            waiting_input #FFB800  executing #06B6D4  trouble #FF8A00
+            completed #22C55E  cancelled #A3A3B8  failed #FF3B5C
+     Dark:  bg #1A0B2E  surface #241541  accent #A78BFA
+            text1 #F5F0FF  text2 #B8A8D9
+            waiting_input #FFD166  executing #22D3EE  trouble #FF9F5C
+            completed #4ADE80  cancelled #9B8FBF  failed #FF5C7A
+     ========================================================================= */
+  .t5 .mode-light {
+    --bg:#FCF7FF; --surface:#FFFFFF; --accent:#7C3AED; --text1:#1F1233; --text2:#6E6491;
+    --waiting:#FFB800; --executing:#06B6D4; --trouble:#FF8A00; --completed:#22C55E; --cancelled:#A3A3B8; --failed:#FF3B5C;
+  }
+  .t5 .mode-dark {
+    --bg:#1A0B2E; --surface:#241541; --accent:#A78BFA; --text1:#F5F0FF; --text2:#B8A8D9;
+    --waiting:#FFD166; --executing:#22D3EE; --trouble:#FF9F5C; --completed:#4ADE80; --cancelled:#9B8FBF; --failed:#FF5C7A;
+  }
+  .t5 .mode-panel { border-radius: 26px; padding: 26px; }
+  .t5 .chip { border-radius: 999px; font-weight: 600; }
+  .t5 .node { border-radius: 20px; border-width: 3px; padding: 12px 16px; }
+  .t5 .node .name { font-weight: 800; font-size: 13px; }
+  .t5 .panel { border-radius: 20px; }
+  .t5 .approve-btn { border-radius: 999px; font-weight: 800; padding: 10px 22px; }
+  .t5 .var-header h2 { font-weight: 800; }
+</style>
+
+<div class="page-header">
+  <h1>Claude Wrapper — Color Theme Explorations</h1>
+  <p>
+    Five directions for the DAG canvas that visualizes agent ("flight") execution. Brief was explicit:
+    colorful, not a dark-terminal aesthetic. Each variation shows its full token set plus a live mock —
+    a small agent DAG for the task <strong>"add OAuth2 login with JWT"</strong> and a Pre-Flight
+    Permission checklist — in both a light and a dark rendition, so shape/typography choices (not just
+    hue) can be compared side by side.
+  </p>
+</div>
+
+<!-- ============================== THEME 1 ============================== -->
+<div class="variation t1">
+  <div class="var-header">
+    <span class="var-index">01 / 05</span>
+    <h2>Flight Tracker</h2>
+    <p class="register">Warm, optimistic, like a flight-tracker app watching your plane land safely.</p>
+  </div>
+  <div class="modes-row">
+    <div class="mode-panel mode-light">
+      <span class="mode-tag">Light</span>
+      <div class="chip-row">
+        <span class="chip"><span class="swatch" style="background:var(--bg)"></span>background <code>#FFF8F0</code></span>
+        <span class="chip"><span class="swatch" style="background:var(--surface)"></span>surface <code>#FFFFFF</code></span>
+        <span class="chip"><span class="swatch" style="background:var(--accent)"></span>accent <code>#2D9CDB</code></span>
+        <span class="chip"><span class="swatch" style="background:var(--text1)"></span>text primary <code>#1A1A2E</code></span>
+        <span class="chip"><span class="swatch" style="background:var(--text2)"></span>text secondary <code>#6B6B7D</code></span>
+        <span class="chip"><span class="swatch" style="background:var(--waiting)"></span>waiting_input <code>#F5A623</code></span>
+        <span class="chip"><span class="swatch" style="background:var(--executing)"></span>executing <code>#2D9CDB</code></span>
+        <span class="chip"><span class="swatch" style="background:var(--trouble)"></span>trouble <code>#FF8C42</code></span>
+        <span class="chip"><span class="swatch" style="background:var(--completed)"></span>completed <code>#27AE60</code></span>
+        <span class="chip"><span class="swatch" style="background:var(--cancelled)"></span>cancelled <code>#9B9BAA</code></span>
+        <span class="chip"><span class="swatch" style="background:var(--failed)"></span>failed <code>#E74C3C</code></span>
+      </div>
+      <p class="task-banner">Task: <strong>add OAuth2 login with JWT</strong></p>
+      <div class="dag">
+        <div class="node st-completed"><div class="name">repo_analysis_agent</div><div class="state"><span class="dot"></span>completed</div></div>
+        <span class="arrow">→</span>
+        <div class="node st-executing"><div class="name">auth_scaffold_worker</div><div class="state"><span class="dot"></span>executing</div></div>
+        <span class="arrow">→</span>
+        <div class="node st-trouble"><div class="name">oauth2_jwt_integration</div><div class="state"><span class="dot"></span>trouble</div></div>
+        <span class="arrow">→</span>
+        <div class="node st-waiting_input"><div class="name">token_refresh_tests</div><div class="state"><span class="dot"></span>waiting_input</div></div>
+      </div>
+      <div class="panel">
+        <h4>Pre-Flight Permission Checklist</h4>
+        <label class="perm-row"><input type="checkbox" checked disabled /> Read repository structure</label>
+        <label class="perm-row"><input type="checkbox" checked disabled /> Run <code>npm install</code></label>
+        <label class="perm-row"><input type="checkbox" disabled /> Write files under <code>src/auth/**</code> — requires approval</label>
+        <button class="approve-btn" type="button">Approve &amp; Continue</button>
+      </div>
+    </div>
+    <div class="mode-panel mode-dark">
+      <span class="mode-tag">Dark</span>
+      <div class="chip-row">
+        <span class="chip"><span class="swatch" style="background:var(--bg)"></span>background <code>#1E1B2E</code></span>
+        <span class="chip"><span class="swatch" style="background:var(--surface)"></span>surface <code>#2A2640</code></span>
+        <span class="chip"><span class="swatch" style="background:var(--accent)"></span>accent <code>#5AB8F5</code></span>
+        <span class="chip"><span class="swatch" style="background:var(--text1)"></span>text primary <code>#F5F0FF</code></span>
+        <span class="chip"><span class="swatch" style="background:var(--text2)"></span>text secondary <code>#B0A8C9</code></span>
+        <span class="chip"><span class="swatch" style="background:var(--waiting)"></span>waiting_input <code>#FFC15E</code></span>
+        <span class="chip"><span class="swatch" style="background:var(--executing)"></span>executing <code>#5AB8F5</code></span>
+        <span class="chip"><span class="swatch" style="background:var(--trouble)"></span>trouble <code>#FF9A5C</code></span>
+        <span class="chip"><span class="swatch" style="background:var(--completed)"></span>completed <code>#4ADE80</code></span>
+        <span class="chip"><span class="swatch" style="background:var(--cancelled)"></span>cancelled <code>#8B84A8</code></span>
+        <span class="chip"><span class="swatch" style="background:var(--failed)"></span>failed <code>#FF6B6B</code></span>
+      </div>
+      <p class="task-banner">Task: <strong>add OAuth2 login with JWT</strong></p>
+      <div class="dag">
+        <div class="node st-completed"><div class="name">repo_analysis_agent</div><div class="state"><span class="dot"></span>completed</div></div>
+        <span class="arrow">→</span>
+        <div class="node st-executing"><div class="name">auth_scaffold_worker</div><div class="state"><span class="dot"></span>executing</div></div>
+        <span class="arrow">→</span>
+        <div class="node st-trouble"><div class="name">oauth2_jwt_integration</div><div class="state"><span class="dot"></span>trouble</div></div>
+        <span class="arrow">→</span>
+        <div class="node st-waiting_input"><div class="name">token_refresh_tests</div><div class="state"><span class="dot"></span>waiting_input</div></div>
+      </div>
+      <div class="panel">
+        <h4>Pre-Flight Permission Checklist</h4>
+        <label class="perm-row"><input type="checkbox" checked disabled /> Read repository structure</label>
+        <label class="perm-row"><input type="checkbox" checked disabled /> Run <code>npm install</code></label>
+        <label class="perm-row"><input type="checkbox" disabled /> Write files under <code>src/auth/**</code> — requires approval</label>
+        <button class="approve-btn" type="button">Approve &amp; Continue</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================== THEME 2 ============================== -->
+<div class="variation t2">
+  <div class="var-header">
+    <span class="var-index">02 / 05</span>
+    <h2>Lab Notebook</h2>
+    <p class="register">Crisp, clinical-but-friendly, like a well-kept lab notebook — precise, legible, unhurried.</p>
+  </div>
+  <div class="modes-row">
+    <div class="mode-panel mode-light">
+      <span class="mode-tag">Light</span>
+      <div class="chip-row">
+        <span class="chip"><span class="swatch" style="background:var(--bg)"></span>background <code>#F4F6F5</code></span>
+        <span class="chip"><span class="swatch" style="background:var(--surface)"></span>surface <code>#FFFFFF</code></span>
+        <span class="chip"><span class="swatch" style="background:var(--accent)"></span>accent <code>#0F9B8E</code></span>
+        <span class="chip"><span class="swatch" style="background:var(--text1)"></span>text primary <code>#16211E</code></span>
+        <span class="chip"><span class="swatch" style="background:var(--text2)"></span>text secondary <code>#5B6B67</code></span>
+        <span class="chip"><span class="swatch" style="background:var(--waiting)"></span>waiting_input <code>#D9A404</code></span>
+        <span class="chip"><span class="swatch" style="background:var(--executing)"></span>executing <code>#0F9B8E</code></span>
+        <span class="chip"><span class="swatch" style="background:var(--trouble)"></span>trouble <code>#D97706</code></span>
+        <span class="chip"><span class="swatch" style="background:var(--completed)"></span>completed <code>#1D9A6C</code></span>
+        <span class="chip"><span class="swatch" style="background:var(--cancelled)"></span>cancelled <code>#8A98A5</code></span>
+        <span class="chip"><span class="swatch" style="background:var(--failed)"></span>failed <code>#DC2626</code></span>
+      </div>
+      <p class="task-banner">Task: <strong>add OAuth2 login with JWT</strong></p>
+      <div class="dag">
+        <div class="node st-completed"><div class="name">repo_analysis_agent</div><div class="state"><span class="dot"></span>completed</div></div>
+        <span class="arrow">→</span>
+        <div class="node st-executing"><div class="name">auth_scaffold_worker</div><div class="state"><span class="dot"></span>executing</div></div>
+        <span class="arrow">→</span>
+        <div class="node st-trouble"><div class="name">oauth2_jwt_integration</div><div class="state"><span class="dot"></span>trouble</div></div>
+        <span class="arrow">→</span>
+        <div class="node st-waiting_input"><div class="name">token_refresh_tests</div><div class="state"><span class="dot"></span>waiting_input</div></div>
+      </div>
+      <div class="panel">
+        <h4>Pre-Flight Permission Checklist</h4>
+        <label class="perm-row"><input type="checkbox" checked disabled /> Read repository structure</label>
+        <label class="perm-row"><input type="checkbox" checked disabled /> Run <code>npm install</code></label>
+        <label class="perm-row"><input type="checkbox" disabled /> Write files under <code>src/auth/**</code> — requires approval</label>
+        <button class="approve-btn" type="button">Approve &amp; Continue</button>
+      </div>
+    </div>
+    <div class="mode-panel mode-dark">
+      <span class="mode-tag">Dark</span>
+      <div class="chip-row">
+        <span class="chip"><span class="swatch" style="background:var(--bg)"></span>background <code>#17262A</code></span>
+        <span class="chip"><span class="swatch" style="background:var(--surface)"></span>surface <code>#1F343A</code></span>
+        <span class="chip"><span class="swatch" style="background:var(--accent)"></span>accent <code>#2DD4BF</code></span>
+        <span class="chip"><span class="swatch" style="background:var(--text1)"></span>text primary <code>#E8F1F0</code></span>
+        <span class="chip"><span class="swatch" style="background:var(--text2)"></span>text secondary <code>#9FB4B0</code></span>
+        <span class="chip"><span class="swatch" style="background:var(--waiting)"></span>waiting_input <code>#FBBF24</code></span>
+        <span class="chip"><span class="swatch" style="background:var(--executing)"></span>executing <code>#2DD4BF</code></span>
+        <span class="chip"><span class="swatch" style="background:var(--trouble)"></span>trouble <code>#FB923C</code></span>
+        <span class="chip"><span class="swatch" style="background:var(--completed)"></span>completed <code>#34D399</code></span>
+        <span class="chip"><span class="swatch" style="background:var(--cancelled)"></span>cancelled <code>#7C8F94</code></span>
+        <span class="chip"><span class="swatch" style="background:var(--failed)"></span>failed <code>#F87171</code></span>
+      </div>
+      <p class="task-banner">Task: <strong>add OAuth2 login with JWT</strong></p>
+      <div class="dag">
+        <div class="node st-completed"><div class="name">repo_analysis_agent</div><div class="state"><span class="dot"></span>completed</div></div>
+        <span class="arrow">→</span>
+        <div class="node st-executing"><div class="name">auth_scaffold_worker</div><div class="state"><span class="dot"></span>executing</div></div>
+        <span class="arrow">→</span>
+        <div class="node st-trouble"><div class="name">oauth2_jwt_integration</div><div class="state"><span class="dot"></span>trouble</div></div>
+        <span class="arrow">→</span>
+        <div class="node st-waiting_input"><div class="name">token_refresh_tests</div><div class="state"><span class="dot"></span>waiting_input</div></div>
+      </div>
+      <div class="panel">
+        <h4>Pre-Flight Permission Checklist</h4>
+        <label class="perm-row"><input type="checkbox" checked disabled /> Read repository structure</label>
+        <label class="perm-row"><input type="checkbox" checked disabled /> Run <code>npm install</code></label>
+        <label class="perm-row"><input type="checkbox" disabled /> Write files under <code>src/auth/**</code> — requires approval</label>
+        <button class="approve-btn" type="button">Approve &amp; Continue</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================== THEME 3 ============================== -->
+<div class="variation t3">
+  <div class="var-header">
+    <span class="var-index">03 / 05</span>
+    <h2>Editorial Desk</h2>
+    <p class="register">Warm and unhurried, like a magazine feature — paper tones, quiet authority.</p>
+  </div>
+  <div class="modes-row">
+    <div class="mode-panel mode-light">
+      <span class="mode-tag">Light</span>
+      <div class="chip-row">
+        <span class="chip"><span class="swatch" style="background:var(--bg)"></span>background <code>#FBF3E7</code></span>
+        <span class="chip"><span class="swatch" style="background:var(--surface)"></span>surface <code>#FFFDF8</code></span>
+        <span class="chip"><span class="swatch" style="background:var(--accent)"></span>accent <code>#C0392B</code></span>
+        <span class="chip"><span class="swatch" style="background:var(--text1)"></span>text primary <code>#2B211A</code></span>
+        <span class="chip"><span class="swatch" style="background:var(--text2)"></span>text secondary <code>#7A6A5C</code></span>
+        <span class="chip"><span class="swatch" style="background:var(--waiting)"></span>waiting_input <code>#D4A017</code></span>
+        <span class="chip"><span class="swatch" style="background:var(--executing)"></span>executing <code>#4A6FA5</code></span>
+        <span class="chip"><span class="swatch" style="background:var(--trouble)"></span>trouble <code>#E07A3F</code></span>
+        <span class="chip"><span class="swatch" style="background:var(--completed)"></span>completed <code>#4B7F52</code></span>
+        <span class="chip"><span class="swatch" style="background:var(--cancelled)"></span>cancelled <code>#A69C8F</code></span>
+        <span class="chip"><span class="swatch" style="background:var(--failed)"></span>failed <code>#A83232</code></span>
+      </div>
+      <p class="task-banner">Task: <strong>add OAuth2 login with JWT</strong></p>
+      <div class="dag">
+        <div class="node st-completed"><div class="name">repo_analysis_agent</div><div class="state"><span class="dot"></span>completed</div></div>
+        <span class="arrow">→</span>
+        <div class="node st-executing"><div class="name">auth_scaffold_worker</div><div class="state"><span class="dot"></span>executing</div></div>
+        <span class="arrow">→</span>
+        <div class="node st-trouble"><div class="name">oauth2_jwt_integration</div><div class="state"><span class="dot"></span>trouble</div></div>
+        <span class="arrow">→</span>
+        <div class="node st-waiting_input"><div class="name">token_refresh_tests</div><div class="state"><span class="dot"></span>waiting_input</div></div>
+      </div>
+      <div class="panel">
+        <h4>Pre-Flight Permission Checklist</h4>
+        <label class="perm-row"><input type="checkbox" checked disabled /> Read repository structure</label>
+        <label class="perm-row"><input type="checkbox" checked disabled /> Run <code>npm install</code></label>
+        <label class="perm-row"><input type="checkbox" disabled /> Write files under <code>src/auth/**</code> — requires approval</label>
+        <button class="approve-btn" type="button">Approve &amp; Continue</button>
+      </div>
+    </div>
+    <div class="mode-panel mode-dark">
+      <span class="mode-tag">Dark</span>
+      <div class="chip-row">
+        <span class="chip"><span class="swatch" style="background:var(--bg)"></span>background <code>#211A14</code></span>
+        <span class="chip"><span class="swatch" style="background:var(--surface)"></span>surface <code>#2C2319</code></span>
+        <span class="chip"><span class="swatch" style="background:var(--accent)"></span>accent <code>#E8875A</code></span>
+        <span class="chip"><span class="swatch" style="background:var(--text1)"></span>text primary <code>#F5E9DA</code></span>
+        <span class="chip"><span class="swatch" style="background:var(--text2)"></span>text secondary <code>#C4B29E</code></span>
+        <span class="chip"><span class="swatch" style="background:var(--waiting)"></span>waiting_input <code>#E5B94E</code></span>
+        <span class="chip"><span class="swatch" style="background:var(--executing)"></span>executing <code>#7FA3D1</code></span>
+        <span class="chip"><span class="swatch" style="background:var(--trouble)"></span>trouble <code>#F0955A</code></span>
+        <span class="chip"><span class="swatch" style="background:var(--completed)"></span>completed <code>#7CAD82</code></span>
+        <span class="chip"><span class="swatch" style="background:var(--cancelled)"></span>cancelled <code>#B8A896</code></span>
+        <span class="chip"><span class="swatch" style="background:var(--failed)"></span>failed <code>#E07272</code></span>
+      </div>
+      <p class="task-banner">Task: <strong>add OAuth2 login with JWT</strong></p>
+      <div class="dag">
+        <div class="node st-completed"><div class="name">repo_analysis_agent</div><div class="state"><span class="dot"></span>completed</div></div>
+        <span class="arrow">→</span>
+        <div class="node st-executing"><div class="name">auth_scaffold_worker</div><div class="state"><span class="dot"></span>executing</div></div>
+        <span class="arrow">→</span>
+        <div class="node st-trouble"><div class="name">oauth2_jwt_integration</div><div class="state"><span class="dot"></span>trouble</div></div>
+        <span class="arrow">→</span>
+        <div class="node st-waiting_input"><div class="name">token_refresh_tests</div><div class="state"><span class="dot"></span>waiting_input</div></div>
+      </div>
+      <div class="panel">
+        <h4>Pre-Flight Permission Checklist</h4>
+        <label class="perm-row"><input type="checkbox" checked disabled /> Read repository structure</label>
+        <label class="perm-row"><input type="checkbox" checked disabled /> Run <code>npm install</code></label>
+        <label class="perm-row"><input type="checkbox" disabled /> Write files under <code>src/auth/**</code> — requires approval</label>
+        <button class="approve-btn" type="button">Approve &amp; Continue</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================== THEME 4 ============================== -->
+<div class="variation t4">
+  <div class="var-header">
+    <span class="var-index">04 / 05</span>
+    <h2>Mission Control</h2>
+    <p class="register">Cool, dense, technical — a night-shift dashboard for reading state at a glance, deliberately not a black/green terminal.</p>
+  </div>
+  <div class="modes-row">
+    <div class="mode-panel mode-dark">
+      <span class="mode-tag">Dark (primary)</span>
+      <div class="chip-row">
+        <span class="chip"><span class="swatch" style="background:var(--bg)"></span>background <code>#0B1120</code></span>
+        <span class="chip"><span class="swatch" style="background:var(--surface)"></span>surface <code>#131B2E</code></span>
+        <span class="chip"><span class="swatch" style="background:var(--accent)"></span>accent <code>#6366F1</code></span>
+        <span class="chip"><span class="swatch" style="background:var(--text1)"></span>text primary <code>#E2E8F0</code></span>
+        <span class="chip"><span class="swatch" style="background:var(--text2)"></span>text secondary <code>#8B96AB</code></span>
+        <span class="chip"><span class="swatch" style="background:var(--waiting)"></span>waiting_input <code>#FBBF24</code></span>
+        <span class="chip"><span class="swatch" style="background:var(--executing)"></span>executing <code>#38BDF8</code></span>
+        <span class="chip"><span class="swatch" style="background:var(--trouble)"></span>trouble <code>#FB7185</code></span>
+        <span class="chip"><span class="swatch" style="background:var(--completed)"></span>completed <code>#34D399</code></span>
+        <span class="chip"><span class="swatch" style="background:var(--cancelled)"></span>cancelled <code>#64748B</code></span>
+        <span class="chip"><span class="swatch" style="background:var(--failed)"></span>failed <code>#EF4444</code></span>
+      </div>
+      <p class="task-banner">Task: <strong>add OAuth2 login with JWT</strong></p>
+      <div class="dag">
+        <div class="node st-completed"><div class="name">repo_analysis_agent</div><div class="state"><span class="dot"></span>completed</div></div>
+        <span class="arrow">→</span>
+        <div class="node st-executing"><div class="name">auth_scaffold_worker</div><div class="state"><span class="dot"></span>executing</div></div>
+        <span class="arrow">→</span>
+        <div class="node st-trouble"><div class="name">oauth2_jwt_integration</div><div class="state"><span class="dot"></span>trouble</div></div>
+        <span class="arrow">→</span>
+        <div class="node st-waiting_input"><div class="name">token_refresh_tests</div><div class="state"><span class="dot"></span>waiting_input</div></div>
+      </div>
+      <div class="panel">
+        <h4>Pre-Flight Permission Checklist</h4>
+        <label class="perm-row"><input type="checkbox" checked disabled /> Read repository structure</label>
+        <label class="perm-row"><input type="checkbox" checked disabled /> Run <code>npm install</code></label>
+        <label class="perm-row"><input type="checkbox" disabled /> Write files under <code>src/auth/**</code> — requires approval</label>
+        <button class="approve-btn" type="button">Approve &amp; Continue</button>
+      </div>
+    </div>
+    <div class="mode-panel mode-light">
+      <span class="mode-tag">Light (companion)</span>
+      <div class="chip-row">
+        <span class="chip"><span class="swatch" style="background:var(--bg)"></span>background <code>#EEF2FF</code></span>
+        <span class="chip"><span class="swatch" style="background:var(--surface)"></span>surface <code>#FFFFFF</code></span>
+        <span class="chip"><span class="swatch" style="background:var(--accent)"></span>accent <code>#4F46E5</code></span>
+        <span class="chip"><span class="swatch" style="background:var(--text1)"></span>text primary <code>#1E1B3A</code></span>
+        <span class="chip"><span class="swatch" style="background:var(--text2)"></span>text secondary <code>#5C5A7A</code></span>
+        <span class="chip"><span class="swatch" style="background:var(--waiting)"></span>waiting_input <code>#D97706</code></span>
+        <span class="chip"><span class="swatch" style="background:var(--executing)"></span>executing <code>#0284C7</code></span>
+        <span class="chip"><span class="swatch" style="background:var(--trouble)"></span>trouble <code>#E11D48</code></span>
+        <span class="chip"><span class="swatch" style="background:var(--completed)"></span>completed <code>#059669</code></span>
+        <span class="chip"><span class="swatch" style="background:var(--cancelled)"></span>cancelled <code>#64748B</code></span>
+        <span class="chip"><span class="swatch" style="background:var(--failed)"></span>failed <code>#DC2626</code></span>
+      </div>
+      <p class="task-banner">Task: <strong>add OAuth2 login with JWT</strong></p>
+      <div class="dag">
+        <div class="node st-completed"><div class="name">repo_analysis_agent</div><div class="state"><span class="dot"></span>completed</div></div>
+        <span class="arrow">→</span>
+        <div class="node st-executing"><div class="name">auth_scaffold_worker</div><div class="state"><span class="dot"></span>executing</div></div>
+        <span class="arrow">→</span>
+        <div class="node st-trouble"><div class="name">oauth2_jwt_integration</div><div class="state"><span class="dot"></span>trouble</div></div>
+        <span class="arrow">→</span>
+        <div class="node st-waiting_input"><div class="name">token_refresh_tests</div><div class="state"><span class="dot"></span>waiting_input</div></div>
+      </div>
+      <div class="panel">
+        <h4>Pre-Flight Permission Checklist</h4>
+        <label class="perm-row"><input type="checkbox" checked disabled /> Read repository structure</label>
+        <label class="perm-row"><input type="checkbox" checked disabled /> Run <code>npm install</code></label>
+        <label class="perm-row"><input type="checkbox" disabled /> Write files under <code>src/auth/**</code> — requires approval</label>
+        <button class="approve-btn" type="button">Approve &amp; Continue</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================== THEME 5 ============================== -->
+<div class="variation t5">
+  <div class="var-header">
+    <span class="var-index">05 / 05</span>
+    <h2>Launch Party</h2>
+    <p class="register">Bold, saturated, playful — energetic enough to make fixing a JWT bug feel like a small celebration.</p>
+  </div>
+  <div class="modes-row">
+    <div class="mode-panel mode-light">
+      <span class="mode-tag">Light</span>
+      <div class="chip-row">
+        <span class="chip"><span class="swatch" style="background:var(--bg)"></span>background <code>#FCF7FF</code></span>
+        <span class="chip"><span class="swatch" style="background:var(--surface)"></span>surface <code>#FFFFFF</code></span>
+        <span class="chip"><span class="swatch" style="background:var(--accent)"></span>accent <code>#7C3AED</code></span>
+        <span class="chip"><span class="swatch" style="background:var(--text1)"></span>text primary <code>#1F1233</code></span>
+        <span class="chip"><span class="swatch" style="background:var(--text2)"></span>text secondary <code>#6E6491</code></span>
+        <span class="chip"><span class="swatch" style="background:var(--waiting)"></span>waiting_input <code>#FFB800</code></span>
+        <span class="chip"><span class="swatch" style="background:var(--executing)"></span>executing <code>#06B6D4</code></span>
+        <span class="chip"><span class="swatch" style="background:var(--trouble)"></span>trouble <code>#FF8A00</code></span>
+        <span class="chip"><span class="swatch" style="background:var(--completed)"></span>completed <code>#22C55E</code></span>
+        <span class="chip"><span class="swatch" style="background:var(--cancelled)"></span>cancelled <code>#A3A3B8</code></span>
+        <span class="chip"><span class="swatch" style="background:var(--failed)"></span>failed <code>#FF3B5C</code></span>
+      </div>
+      <p class="task-banner">Task: <strong>add OAuth2 login with JWT</strong></p>
+      <div class="dag">
+        <div class="node st-completed"><div class="name">repo_analysis_agent</div><div class="state"><span class="dot"></span>completed</div></div>
+        <span class="arrow">→</span>
+        <div class="node st-executing"><div class="name">auth_scaffold_worker</div><div class="state"><span class="dot"></span>executing</div></div>
+        <span class="arrow">→</span>
+        <div class="node st-trouble"><div class="name">oauth2_jwt_integration</div><div class="state"><span class="dot"></span>trouble</div></div>
+        <span class="arrow">→</span>
+        <div class="node st-waiting_input"><div class="name">token_refresh_tests</div><div class="state"><span class="dot"></span>waiting_input</div></div>
+      </div>
+      <div class="panel">
+        <h4>Pre-Flight Permission Checklist</h4>
+        <label class="perm-row"><input type="checkbox" checked disabled /> Read repository structure</label>
+        <label class="perm-row"><input type="checkbox" checked disabled /> Run <code>npm install</code></label>
+        <label class="perm-row"><input type="checkbox" disabled /> Write files under <code>src/auth/**</code> — requires approval</label>
+        <button class="approve-btn" type="button">Approve &amp; Continue</button>
+      </div>
+    </div>
+    <div class="mode-panel mode-dark">
+      <span class="mode-tag">Dark</span>
+      <div class="chip-row">
+        <span class="chip"><span class="swatch" style="background:var(--bg)"></span>background <code>#1A0B2E</code></span>
+        <span class="chip"><span class="swatch" style="background:var(--surface)"></span>surface <code>#241541</code></span>
+        <span class="chip"><span class="swatch" style="background:var(--accent)"></span>accent <code>#A78BFA</code></span>
+        <span class="chip"><span class="swatch" style="background:var(--text1)"></span>text primary <code>#F5F0FF</code></span>
+        <span class="chip"><span class="swatch" style="background:var(--text2)"></span>text secondary <code>#B8A8D9</code></span>
+        <span class="chip"><span class="swatch" style="background:var(--waiting)"></span>waiting_input <code>#FFD166</code></span>
+        <span class="chip"><span class="swatch" style="background:var(--executing)"></span>executing <code>#22D3EE</code></span>
+        <span class="chip"><span class="swatch" style="background:var(--trouble)"></span>trouble <code>#FF9F5C</code></span>
+        <span class="chip"><span class="swatch" style="background:var(--completed)"></span>completed <code>#4ADE80</code></span>
+        <span class="chip"><span class="swatch" style="background:var(--cancelled)"></span>cancelled <code>#9B8FBF</code></span>
+        <span class="chip"><span class="swatch" style="background:var(--failed)"></span>failed <code>#FF5C7A</code></span>
+      </div>
+      <p class="task-banner">Task: <strong>add OAuth2 login with JWT</strong></p>
+      <div class="dag">
+        <div class="node st-completed"><div class="name">repo_analysis_agent</div><div class="state"><span class="dot"></span>completed</div></div>
+        <span class="arrow">→</span>
+        <div class="node st-executing"><div class="name">auth_scaffold_worker</div><div class="state"><span class="dot"></span>executing</div></div>
+        <span class="arrow">→</span>
+        <div class="node st-trouble"><div class="name">oauth2_jwt_integration</div><div class="state"><span class="dot"></span>trouble</div></div>
+        <span class="arrow">→</span>
+        <div class="node st-waiting_input"><div class="name">token_refresh_tests</div><div class="state"><span class="dot"></span>waiting_input</div></div>
+      </div>
+      <div class="panel">
+        <h4>Pre-Flight Permission Checklist</h4>
+        <label class="perm-row"><input type="checkbox" checked disabled /> Read repository structure</label>
+        <label class="perm-row"><input type="checkbox" checked disabled /> Run <code>npm install</code></label>
+        <label class="perm-row"><input type="checkbox" disabled /> Write files under <code>src/auth/**</code> — requires approval</label>
+        <button class="approve-btn" type="button">Approve &amp; Continue</button>
+      </div>
+    </div>
+  </div>
+</div>

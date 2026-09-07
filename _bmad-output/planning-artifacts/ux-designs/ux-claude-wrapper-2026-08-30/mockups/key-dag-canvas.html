@@ -1,0 +1,579 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Claude Wrapper — DAG Canvas</title>
+<style>
+/*
+  illustrates:
+  - Colors (node status palette: waiting_input / executing / trouble / completed / cancelled / failed — light mode tokens)
+  - Layout (browser device frame for a web app, two-pane canvas + task-list sidebar)
+  - Components (node card, flight-path line, telemetry stat chip, token-usage indicator, legend)
+  - State Patterns (6 node statuses represented simultaneously across the DAG + legend)
+  - Typography (system font for agent/node names — no monospace; monospace reserved for literal paths)
+  - Elevation (0 2px 8px rgba(0,0,0,.05) node cards; 0 6px 24px rgba(45,156,219,.10) panels)
+  - Motion intent (see inline comments near status-bearing elements)
+*/
+
+:root {
+  --bg: #FFF8F0;
+  --surface: #FFFFFF;
+  --accent: #2D9CDB;
+  --text-primary: #1A1A2E;
+  --text-secondary: #6B6B7D;
+
+  --status-waiting: #F5A623;
+  --status-executing: #2D9CDB;
+  --status-trouble: #FF8C42;
+  --status-completed: #27AE60;
+  --status-cancelled: #9B9BAA;
+  --status-failed: #E74C3C;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: #E7E5DE;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+
+body {
+  padding: 28px 16px;
+  display: flex;
+  justify-content: center;
+}
+
+/* ---- browser device frame ---- */
+.browser-frame {
+  width: min(1400px, 98vw);
+  background: var(--surface);
+  border-radius: 14px;
+  overflow: hidden;
+  border: 1px solid #E4E1D8;
+  box-shadow: 0 6px 24px rgba(45,156,219,.10), 0 1px 3px rgba(0,0,0,.06);
+}
+
+.browser-chrome {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 11px 16px;
+  background: #F2EFE9;
+  border-bottom: 1px solid #E4E1D8;
+}
+
+.traffic-lights { display: flex; gap: 8px; flex-shrink: 0; }
+.traffic-lights span { width: 11px; height: 11px; border-radius: 50%; display: inline-block; }
+.tl-red { background: #FF5F57; }
+.tl-yellow { background: #FEBC2E; }
+.tl-green { background: #28C840; }
+
+.browser-tabs { display: flex; gap: 6px; margin-right: 8px; }
+.browser-tab {
+  font-size: 12px;
+  color: var(--text-secondary);
+  background: #FFFFFF;
+  border: 1px solid #E4E1D8;
+  border-bottom: none;
+  padding: 5px 12px;
+  border-radius: 8px 8px 0 0;
+}
+.browser-tab.active { color: var(--text-primary); font-weight: 600; }
+
+.address-bar {
+  flex: 1;
+  background: #FFFFFF;
+  border: 1px solid #E4E1D8;
+  border-radius: 999px;
+  padding: 6px 16px;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+
+/* ---- app viewport ---- */
+.viewport {
+  background: var(--bg);
+  min-height: 780px;
+}
+
+.app-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 18px 28px;
+  border-bottom: 1px solid #EFE7DA;
+  background: var(--surface);
+}
+
+.app-header-left { display: flex; align-items: baseline; gap: 14px; min-width: 0; }
+
+.wordmark {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+.wordmark::before {
+  content: "";
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  margin-right: 8px;
+}
+
+.run-title {
+  font-size: 15px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.run-title strong { color: var(--text-primary); font-weight: 600; }
+
+.run-status-pill {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-primary);
+  background: rgba(45,156,219,0.12);
+  border: 1px solid rgba(45,156,219,0.30);
+  padding: 5px 14px;
+  border-radius: 999px;
+}
+.run-status-pill .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--status-executing); }
+/* on status change: 200ms ease color transition for .dot and pill background */
+
+/* telemetry strip */
+.telemetry-strip {
+  display: flex;
+  gap: 10px;
+  flex-shrink: 0;
+}
+.telemetry-chip {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 6px 14px;
+  border-radius: 12px;
+  background: var(--bg);
+  border: 1px solid #EFE7DA;
+  min-width: 108px;
+}
+.telemetry-chip .label {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-secondary);
+}
+.telemetry-chip .value {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+.telemetry-chip .value .expected {
+  font-weight: 500;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.telemetry-chip.over .value { color: var(--status-trouble); }
+
+/* ---- main layout: canvas + sidebar ---- */
+.main-row {
+  display: flex;
+  align-items: stretch;
+}
+
+.canvas-panel {
+  flex: 1;
+  min-width: 0;
+  padding: 24px;
+  position: relative;
+}
+
+.canvas-panel-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+.canvas-panel-heading h2 {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.legend {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+  color: var(--text-secondary);
+}
+.legend-item .swatch { width: 8px; height: 8px; border-radius: 50%; }
+
+.canvas {
+  position: relative;
+  width: 100%;
+  height: 560px;
+  background:
+    radial-gradient(circle at 1px 1px, #EFE7DA 1px, transparent 0) 0 0 / 22px 22px;
+  border-radius: 20px;
+  border: 1px solid #EFE7DA;
+  overflow: hidden;
+}
+
+.canvas svg { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+
+.node {
+  position: absolute;
+  width: 190px;
+  background: var(--surface);
+  border-radius: 18px;
+  box-shadow: 0 2px 8px rgba(0,0,0,.05);
+  border: 1px solid #EFE7DA;
+  padding: 12px 14px;
+  z-index: 2;
+}
+/* on status change: 200ms ease color transition on .node-status-bar and .status-chip */
+
+.node-status-bar {
+  height: 4px;
+  width: 34px;
+  border-radius: 999px;
+  margin-bottom: 9px;
+}
+.node.st-executing .node-status-bar { background: var(--status-executing); }
+.node.st-completed .node-status-bar { background: var(--status-completed); }
+.node.st-trouble .node-status-bar { background: var(--status-trouble); }
+.node.st-waiting .node-status-bar { background: var(--status-waiting); }
+.node.st-cancelled .node-status-bar { background: var(--status-cancelled); }
+
+.node-name {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 3px;
+}
+.node-role {
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  margin-bottom: 10px;
+}
+
+.node-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.status-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10.5px;
+  font-weight: 600;
+  padding: 3px 9px 3px 7px;
+  border-radius: 999px;
+}
+.status-chip .dot { width: 6px; height: 6px; border-radius: 50%; }
+
+.node.st-executing .status-chip { background: rgba(45,156,219,.13); color: #1D6FA0; }
+.node.st-executing .status-chip .dot { background: var(--status-executing); }
+.node.st-completed .status-chip { background: rgba(39,174,96,.14); color: #1F7A45; }
+.node.st-completed .status-chip .dot { background: var(--status-completed); }
+.node.st-trouble .status-chip { background: rgba(255,140,66,.16); color: #B8571D; }
+.node.st-trouble .status-chip .dot { background: var(--status-trouble); }
+.node.st-waiting .status-chip { background: rgba(245,166,35,.16); color: #92600C; }
+.node.st-waiting .status-chip .dot { background: var(--status-waiting); }
+.node.st-cancelled .status-chip { background: rgba(155,155,170,.16); color: #6B6B7D; }
+.node.st-cancelled .status-chip .dot { background: var(--status-cancelled); }
+
+.token-indicator {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10.5px;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+.token-indicator .bar {
+  width: 30px;
+  height: 4px;
+  border-radius: 999px;
+  background: #EFE7DA;
+  overflow: hidden;
+  position: relative;
+}
+.token-indicator .bar > span {
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  border-radius: 999px;
+  background: var(--accent);
+}
+
+.node.dimmed { opacity: 0.55; }
+.node.dimmed .node-name { color: var(--text-secondary); }
+
+/* flight path label */
+.flight-path-label {
+  position: absolute;
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--accent);
+  background: rgba(45,156,219,.10);
+  padding: 3px 10px;
+  border-radius: 999px;
+  letter-spacing: 0.02em;
+  z-index: 3;
+}
+
+/* ---- sidebar task list ---- */
+.sidebar {
+  width: 300px;
+  flex-shrink: 0;
+  border-left: 1px solid #EFE7DA;
+  padding: 24px 20px;
+  background: var(--surface);
+}
+.sidebar h2 {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0 0 4px 0;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.sidebar .sub {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 16px;
+}
+
+.task-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 11px 0;
+  border-bottom: 1px solid #F5F0E6;
+}
+.task-row:last-child { border-bottom: none; }
+
+.task-row .status-dot {
+  width: 9px; height: 9px;
+  border-radius: 50%;
+  margin-top: 4px;
+  flex-shrink: 0;
+}
+.task-row.st-executing .status-dot { background: var(--status-executing); }
+.task-row.st-completed .status-dot { background: var(--status-completed); }
+.task-row.st-trouble .status-dot { background: var(--status-trouble); }
+.task-row.st-waiting .status-dot { background: var(--status-waiting); }
+.task-row.st-cancelled .status-dot { background: var(--status-cancelled); }
+
+.task-row-body { flex: 1; min-width: 0; }
+.task-row-name { font-size: 13.5px; font-weight: 600; color: var(--text-primary); }
+.task-row-meta { font-size: 11.5px; color: var(--text-secondary); margin-top: 2px; }
+.task-row-status-text { font-size: 11px; font-weight: 600; margin-top: 3px; }
+.task-row.st-executing .task-row-status-text { color: #1D6FA0; }
+.task-row.st-completed .task-row-status-text { color: #1F7A45; }
+.task-row.st-trouble .task-row-status-text { color: #B8571D; }
+.task-row.st-waiting .task-row-status-text { color: #92600C; }
+.task-row.st-cancelled .task-row-status-text { color: var(--text-secondary); }
+
+</style>
+</head>
+<body>
+
+<div class="browser-frame">
+
+  <div class="browser-chrome">
+    <div class="traffic-lights">
+      <span class="tl-red"></span><span class="tl-yellow"></span><span class="tl-green"></span>
+    </div>
+    <div class="browser-tabs">
+      <div class="browser-tab active">run_8823 · Claude Wrapper</div>
+    </div>
+    <div class="address-bar">app.claudewrapper.dev/runs/run_8823</div>
+  </div>
+
+  <div class="viewport">
+
+    <div class="app-header">
+      <div class="app-header-left">
+        <span class="wordmark">Claude Wrapper</span>
+        <span class="run-title">Run: <strong>add OAuth2 login with JWT</strong></span>
+      </div>
+
+      <div class="telemetry-strip">
+        <div class="telemetry-chip">
+          <span class="label">Elapsed</span>
+          <span class="value">6m 12s <span class="expected">/ 8m est.</span></span>
+        </div>
+        <div class="telemetry-chip over">
+          <span class="label">Tokens</span>
+          <span class="value">42.3k <span class="expected">/ 38k est.</span></span>
+        </div>
+      </div>
+
+      <div class="run-status-pill"><span class="dot"></span>In progress</div>
+    </div>
+
+    <div class="main-row">
+
+      <div class="canvas-panel">
+        <div class="canvas-panel-heading">
+          <h2>Flight path</h2>
+          <div class="legend">
+            <div class="legend-item"><span class="swatch" style="background:#F5A623"></span>waiting_input</div>
+            <div class="legend-item"><span class="swatch" style="background:#2D9CDB"></span>executing</div>
+            <div class="legend-item"><span class="swatch" style="background:#FF8C42"></span>trouble</div>
+            <div class="legend-item"><span class="swatch" style="background:#27AE60"></span>completed</div>
+            <div class="legend-item"><span class="swatch" style="background:#9B9BAA"></span>cancelled</div>
+            <div class="legend-item"><span class="swatch" style="background:#E74C3C"></span>failed</div>
+          </div>
+        </div>
+
+        <div class="canvas">
+          <svg viewBox="0 0 900 560" preserveAspectRatio="none">
+            <!-- static connective lines, drawn thin/neutral -->
+            <line x1="450" y1="118" x2="180" y2="248" stroke="#E4E1D8" stroke-width="2" />
+            <line x1="450" y1="118" x2="720" y2="248" stroke="#E4E1D8" stroke-width="2" />
+            <!-- flight path: orchestrator -> backend_planner -> auth_scaffold_worker, the active route -->
+            <!-- on tick: subtle 1200ms ease-in-out opacity pulse along dash, not a hard blink -->
+            <line x1="450" y1="118" x2="450" y2="248" stroke="#2D9CDB" stroke-width="3" stroke-dasharray="7 6" />
+            <line x1="450" y1="330" x2="450" y2="418" stroke="#2D9CDB" stroke-width="3" stroke-dasharray="7 6" />
+          </svg>
+
+          <!-- orchestrator -->
+          <div class="node st-executing" style="left:355px; top:36px;">
+            <div class="node-status-bar"></div>
+            <div class="node-name">Orchestrator</div>
+            <div class="node-role">main run coordinator</div>
+            <div class="node-foot">
+              <span class="status-chip"><span class="dot"></span>executing</span>
+              <span class="token-indicator">12.1k<span class="bar"><span style="width:64%"></span></span></span>
+            </div>
+          </div>
+
+          <!-- backend_planner -->
+          <div class="node st-completed" style="left:85px; top:248px;">
+            <div class="node-status-bar"></div>
+            <div class="node-name">backend_planner</div>
+            <div class="node-role">designs auth module layout</div>
+            <div class="node-foot">
+              <span class="status-chip"><span class="dot"></span>completed</span>
+              <span class="token-indicator">9.8k<span class="bar"><span style="width:100%"></span></span></span>
+            </div>
+          </div>
+
+          <!-- token_refresh_worker -->
+          <div class="node st-waiting dimmed" style="left:625px; top:248px;">
+            <div class="node-status-bar"></div>
+            <div class="node-name">token_refresh_worker</div>
+            <div class="node-role">refresh-token rotation</div>
+            <div class="node-foot">
+              <span class="status-chip"><span class="dot"></span>waiting_input</span>
+              <span class="token-indicator">0<span class="bar"><span style="width:0%"></span></span></span>
+            </div>
+          </div>
+
+          <!-- auth_scaffold_worker: on the flight path, in trouble -->
+          <div class="node st-trouble" style="left:355px; top:330px; box-shadow:0 2px 8px rgba(0,0,0,.05), 0 0 0 2px rgba(255,140,66,.35);">
+            <div class="node-status-bar"></div>
+            <div class="node-name">auth_scaffold_worker</div>
+            <div class="node-role">scaffolds JWT auth code</div>
+            <div class="node-foot">
+              <span class="status-chip"><span class="dot"></span>trouble</span>
+              <span class="token-indicator">18.4k<span class="bar"><span style="width:48%"></span></span></span>
+            </div>
+          </div>
+
+          <!-- downstream, blocked -->
+          <div class="node st-cancelled dimmed" style="left:355px; top:434px;">
+            <div class="node-status-bar"></div>
+            <div class="node-name">jwt_test_writer</div>
+            <div class="node-role">writes auth test suite</div>
+            <div class="node-foot">
+              <span class="status-chip"><span class="dot"></span>cancelled</span>
+              <span class="token-indicator">0<span class="bar"><span style="width:0%"></span></span></span>
+            </div>
+          </div>
+
+          <div class="flight-path-label" style="left:466px; top:180px;">active route</div>
+        </div>
+      </div>
+
+      <div class="sidebar">
+        <h2>Agents</h2>
+        <div class="sub">5 in this run</div>
+
+        <div class="task-row st-executing">
+          <span class="status-dot"></span>
+          <div class="task-row-body">
+            <div class="task-row-name">Orchestrator</div>
+            <div class="task-row-meta">12.1k tokens · 6m 12s</div>
+            <div class="task-row-status-text">executing</div>
+          </div>
+        </div>
+
+        <div class="task-row st-completed">
+          <span class="status-dot"></span>
+          <div class="task-row-body">
+            <div class="task-row-name">backend_planner</div>
+            <div class="task-row-meta">9.8k tokens · 2m 04s</div>
+            <div class="task-row-status-text">completed</div>
+          </div>
+        </div>
+
+        <div class="task-row st-trouble">
+          <span class="status-dot"></span>
+          <div class="task-row-body">
+            <div class="task-row-name">auth_scaffold_worker</div>
+            <div class="task-row-meta">18.4k tokens · 3m 41s</div>
+            <div class="task-row-status-text">needs a decision</div>
+          </div>
+        </div>
+
+        <div class="task-row st-waiting">
+          <span class="status-dot"></span>
+          <div class="task-row-body">
+            <div class="task-row-name">token_refresh_worker</div>
+            <div class="task-row-meta">0 tokens · not started</div>
+            <div class="task-row-status-text">waiting on permissions</div>
+          </div>
+        </div>
+
+        <div class="task-row st-cancelled">
+          <span class="status-dot"></span>
+          <div class="task-row-body">
+            <div class="task-row-name">jwt_test_writer</div>
+            <div class="task-row-meta">0 tokens · blocked upstream</div>
+            <div class="task-row-status-text">cancelled</div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

@@ -1,0 +1,861 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Claude Wrapper — Flight Path Replay</title>
+<style>
+/*
+  This is the EXPANDED flight path replay for a completed run (same run as
+  the DAG Canvas and Post-run Audit mocks: "add OAuth2 login with JWT"),
+  reached via "View full flight path" from key-post-run-audit.html's compact
+  replay panel. It is a full-canvas-style graph, same visual family as the
+  live DAG Canvas, but explicitly reframed as a REPLAY: static and
+  historical, never re-fetching or animating.
+
+  DESIGN.md / EXPERIENCE.md concerns illustrated here:
+  - Components: context-node-level replay annotation — auth_scaffold_worker
+    is broken out into its six individual context nodes along the canvas,
+    each with its own token figure and bar, not just one agent-level box.
+    This is FR-20's "token usage highlighted per context node and per
+    agent," shown both on-canvas and again as a nested breakdown in the
+    token-totals sidebar.
+  - State Patterns: distinguishes this screen from the live canvas via
+    explicit "Replay" state framing — a persistent header badge, a
+    sub-header note ("static snapshot… nothing here is executing"), solid
+    (non-pulsing) route lines instead of the live canvas's animated dashed
+    pulse, and a reduced 3-item legend scoped to states a finished run can
+    actually end in (completed / trouble-then-recovered / cancelled) rather
+    than the live canvas's full 6-state legend.
+  - Components (secondary): agent-level replay node, context-node lane
+    (grouping rect + sequence badges showing chronological order), detour
+    connector pair (dashed trouble-orange in, solid recovered-green out)
+    reflecting the trouble-then-push recovery, cancelled node shown dashed
+    /off-route, per-agent token-totals sidebar consistent with the Post-run
+    Audit's numbers.
+  - Colors: node status palette reused as historical/final-state markers,
+    not live indicators — no node here is "executing."
+  - Layout: browser device frame; full graph canvas + fixed-width sidebar,
+    larger and more detailed than the Post-run Audit's compact panel.
+  - Typography: system font for all agent/node/UI text; monospace reserved
+    narrowly for literal file-adjacent identifiers (none needed here, kept
+    for token consistency with sibling mocks).
+  - Elevation: 0 2px 8px rgba(0,0,0,.05) on node/panel cards; 0 6px 24px
+    rgba(45,156,219,.10) on the browser frame.
+  - Accessibility: text/background pairs kept at real contrast ratios;
+    :focus-visible outline defined for "Back to summary" and all
+    interactive controls.
+*/
+
+:root {
+  --bg: #FFF8F0;
+  --surface: #FFFFFF;
+  --accent: #2D9CDB;
+  --text-primary: #1A1A2E;
+  --text-secondary: #6B6B7D;
+
+  --status-waiting: #F5A623;
+  --status-executing: #2D9CDB;
+  --status-trouble: #FF8C42;
+  --status-completed: #27AE60;
+  --status-cancelled: #9B9BAA;
+  --status-failed: #E74C3C;
+
+  --line: #EFE7DA;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: #E7E5DE;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+
+body {
+  padding: 28px 16px;
+  display: flex;
+  justify-content: center;
+}
+
+/* ---- browser device frame ---- */
+.browser-frame {
+  width: min(1440px, 98vw);
+  background: var(--surface);
+  border-radius: 14px;
+  overflow: hidden;
+  border: 1px solid #E4E1D8;
+  box-shadow: 0 6px 24px rgba(45,156,219,.10), 0 1px 3px rgba(0,0,0,.06);
+}
+
+.browser-chrome {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 11px 16px;
+  background: #F2EFE9;
+  border-bottom: 1px solid #E4E1D8;
+}
+
+.traffic-lights { display: flex; gap: 8px; flex-shrink: 0; }
+.traffic-lights span { width: 11px; height: 11px; border-radius: 50%; display: inline-block; }
+.tl-red { background: #FF5F57; }
+.tl-yellow { background: #FEBC2E; }
+.tl-green { background: #28C840; }
+
+.browser-tabs { display: flex; gap: 6px; margin-right: 8px; }
+.browser-tab {
+  font-size: 12px;
+  color: var(--text-secondary);
+  background: #FFFFFF;
+  border: 1px solid #E4E1D8;
+  border-bottom: none;
+  padding: 5px 12px;
+  border-radius: 8px 8px 0 0;
+}
+.browser-tab.active { color: var(--text-primary); font-weight: 600; }
+
+.address-bar {
+  flex: 1;
+  background: #FFFFFF;
+  border: 1px solid #E4E1D8;
+  border-radius: 999px;
+  padding: 6px 16px;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+
+/* ---- app viewport ---- */
+.viewport {
+  background: var(--bg);
+  min-height: 780px;
+}
+
+/* ---- header ---- */
+.app-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 16px 28px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+  flex-wrap: wrap;
+}
+
+.app-header-left { display: flex; align-items: baseline; gap: 14px; min-width: 0; }
+
+.wordmark {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+.wordmark::before {
+  content: "";
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  margin-right: 8px;
+}
+
+.breadcrumb {
+  font-size: 13px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.breadcrumb strong { color: var(--text-primary); font-weight: 600; }
+.breadcrumb .sep { margin: 0 6px; color: #C9C2B2; }
+
+.app-header-right { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+
+.btn {
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-primary);
+  background: var(--surface);
+  border: 1px solid #DCD5C6;
+  padding: 7px 14px;
+  border-radius: 10px;
+  cursor: default;
+}
+.btn.primary {
+  color: #FFFFFF;
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* ---- replay sub-header: the explicit "not live" framing ---- */
+.replay-subbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 28px;
+  background: #F4F0E6;
+  border-bottom: 1px solid var(--line);
+  flex-wrap: wrap;
+}
+
+.replay-badge-lg {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--text-primary);
+  background: var(--surface);
+  border: 1px solid #DCD5C6;
+  padding: 6px 14px 6px 12px;
+  border-radius: 999px;
+}
+.replay-badge-lg .sq {
+  width: 7px;
+  height: 7px;
+  background: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+.replay-subbar-note {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+/* ---- main layout: canvas + sidebar ---- */
+.main-row {
+  display: flex;
+  align-items: stretch;
+}
+
+.canvas-panel {
+  flex: 1;
+  min-width: 0;
+  padding: 24px;
+  position: relative;
+}
+
+.canvas-panel-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.canvas-panel-heading h2 {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.canvas-panel-heading .sub {
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: normal;
+  margin-left: 8px;
+}
+
+.legend {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+  color: var(--text-secondary);
+}
+.legend-item .swatch { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.legend-item .swatch.dash { border-radius: 2px; background: none; border: 1.5px dashed var(--status-trouble); width: 12px; height: 6px; }
+.legend-item .swatch.line-cancel { border-radius: 2px; background: none; border: 1.5px dashed var(--status-cancelled); width: 12px; height: 6px; }
+
+.canvas {
+  position: relative;
+  width: 100%;
+  height: 1180px;
+  background:
+    radial-gradient(circle at 1px 1px, #EFE7DA 1px, transparent 0) 0 0 / 22px 22px;
+  border-radius: 20px;
+  border: 1px solid #EFE7DA;
+  overflow: hidden;
+}
+
+.canvas svg { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+
+/* ---- agent-level replay node ---- */
+.rp-node {
+  position: absolute;
+  width: 200px;
+  background: var(--surface);
+  border-radius: 18px;
+  box-shadow: 0 2px 8px rgba(0,0,0,.05);
+  border: 1px solid #EFE7DA;
+  padding: 13px 15px;
+  z-index: 2;
+}
+
+.rp-node-status-bar {
+  height: 4px;
+  width: 34px;
+  border-radius: 999px;
+  margin-bottom: 9px;
+}
+.rp-node.st-completed .rp-node-status-bar { background: var(--status-completed); }
+.rp-node.st-cancelled .rp-node-status-bar { background: var(--status-cancelled); }
+
+.rp-node-name {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 3px;
+}
+.rp-node-role {
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  margin-bottom: 10px;
+  line-height: 1.4;
+}
+
+.rp-node-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+
+.rp-status-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10.5px;
+  font-weight: 600;
+  padding: 3px 9px 3px 7px;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+.rp-status-chip .dot { width: 6px; height: 6px; border-radius: 50%; }
+.rp-node.st-completed .rp-status-chip { background: rgba(39,174,96,.14); color: #1F7A45; }
+.rp-node.st-completed .rp-status-chip .dot { background: var(--status-completed); }
+.rp-node.st-cancelled .rp-status-chip { background: rgba(155,155,170,.16); color: #6B6B7D; }
+.rp-node.st-cancelled .rp-status-chip .dot { background: var(--status-cancelled); }
+
+.rp-token-figure { font-size: 10.5px; color: var(--text-secondary); font-variant-numeric: tabular-nums; text-align: right; }
+.rp-token-figure strong { color: var(--text-primary); font-size: 12px; display: block; }
+
+.rp-node.st-cancelled { border-style: dashed; border-color: #C4C3CE; opacity: 0.82; background: #FBFAF9; }
+.rp-node.st-cancelled .rp-node-name { color: var(--text-secondary); }
+.rp-node-offroute-tag {
+  display: block;
+  font-size: 10px;
+  color: var(--text-secondary);
+  font-style: italic;
+  margin-top: 6px;
+}
+
+/* ---- context-node lane (grouping behind auth_scaffold_worker's steps) ---- */
+.ctx-lane-header {
+  position: absolute;
+  text-align: center;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #4E7CA0;
+  background: rgba(45,156,219,.10);
+  border: 1px solid rgba(45,156,219,.18);
+  padding: 5px 0;
+  border-radius: 10px;
+  z-index: 5;
+}
+
+/* ---- context node (small, per-step) ---- */
+.ctx-node {
+  position: absolute;
+  width: 192px;
+  background: var(--surface);
+  border-radius: 14px;
+  box-shadow: 0 2px 8px rgba(0,0,0,.05);
+  border: 1px solid #EFE7DA;
+  padding: 9px 12px 10px;
+  z-index: 3;
+}
+.ctx-node.trouble {
+  border-color: rgba(255,140,66,.55);
+  box-shadow: 0 2px 8px rgba(0,0,0,.05), 0 0 0 2px rgba(255,140,66,.28);
+}
+.ctx-node.resumed {
+  border-color: rgba(39,174,96,.45);
+}
+
+.ctx-index {
+  position: absolute;
+  top: -9px;
+  left: -9px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--text-primary);
+  color: #FFFFFF;
+  font-size: 10px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 4;
+  border: 2px solid var(--bg);
+}
+.ctx-node.trouble .ctx-index { background: var(--status-trouble); }
+.ctx-node.resumed .ctx-index { background: var(--status-completed); }
+
+.ctx-tag {
+  display: inline-block;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+}
+.ctx-node.trouble .ctx-tag { color: #B8571D; }
+.ctx-node.resumed .ctx-tag { color: #1F7A45; }
+
+.ctx-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-primary);
+  line-height: 1.3;
+  margin-bottom: 8px;
+  min-height: 32px;
+}
+
+.ctx-note {
+  font-size: 10.5px;
+  color: #B8571D;
+  line-height: 1.4;
+  margin: -3px 0 8px;
+}
+
+.ctx-token-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.ctx-token-figures { font-size: 11px; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+.ctx-token-figures strong { color: var(--text-primary); font-size: 12.5px; }
+.ctx-bar { width: 62px; height: 5px; border-radius: 999px; background: #E9E2D3; overflow: hidden; position: relative; flex-shrink: 0; }
+.ctx-bar > span { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 999px; background: var(--accent); }
+.ctx-node.trouble .ctx-bar > span { background: var(--status-trouble); }
+.ctx-node.resumed .ctx-bar > span { background: var(--status-completed); }
+
+/* route line labels */
+.route-label {
+  position: absolute;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 3px 9px;
+  border-radius: 999px;
+  letter-spacing: 0.02em;
+  z-index: 3;
+  white-space: nowrap;
+}
+.route-label.historical { color: var(--accent); background: rgba(45,156,219,.10); }
+.route-label.detour { color: #B8571D; background: rgba(255,140,66,.14); }
+.route-label.resumed { color: #1F7A45; background: rgba(39,174,96,.13); }
+.route-label.offroute { color: #6B6B7D; background: rgba(155,155,170,.14); }
+
+/* ---- sidebar: per-agent token totals ---- */
+.sidebar {
+  width: 300px;
+  flex-shrink: 0;
+  border-left: 1px solid #EFE7DA;
+  padding: 24px 20px;
+  background: var(--surface);
+}
+.sidebar h2 {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0 0 4px 0;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.sidebar .sub {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 16px;
+}
+
+.totals-row {
+  padding: 11px 0;
+  border-bottom: 1px solid #F5F0E6;
+}
+.totals-row-head { display: flex; align-items: flex-start; gap: 9px; }
+.totals-row .status-dot { width: 9px; height: 9px; border-radius: 50%; margin-top: 4px; flex-shrink: 0; }
+.totals-row.st-completed .status-dot { background: var(--status-completed); }
+.totals-row.st-cancelled .status-dot { background: var(--status-cancelled); }
+
+.totals-row-body { flex: 1; min-width: 0; }
+.totals-row-name { font-size: 13.5px; font-weight: 600; color: var(--text-primary); }
+.totals-row-figures {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 2px;
+}
+.totals-row-tokens { font-size: 14px; font-weight: 700; color: var(--text-primary); font-variant-numeric: tabular-nums; }
+.totals-row-tokens .vs { font-weight: 500; color: var(--text-secondary); font-size: 11px; }
+.totals-delta { font-size: 10.5px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.totals-delta.over { color: #B8571D; }
+.totals-delta.under { color: #1F7A45; }
+
+.ctx-breakdown {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0 0 0 18px;
+  border-left: 2px dotted #E4E1D8;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.ctx-breakdown li {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+.ctx-breakdown li strong { color: var(--text-primary); font-weight: 600; font-variant-numeric: tabular-nums; }
+.ctx-breakdown li.detour-line { color: #B8571D; }
+
+.totals-note {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-top: 5px;
+  line-height: 1.4;
+  max-width: 260px;
+}
+
+.totals-row.cancelled-row { border-style: dashed; }
+.not-counted-pill {
+  display: inline-flex;
+  font-size: 9.5px;
+  font-weight: 700;
+  color: #55556A;
+  background: #EAE9EF;
+  border: 1px solid #D3D2DC;
+  padding: 2px 8px;
+  border-radius: 999px;
+  margin-top: 5px;
+}
+
+.totals-total {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding-top: 14px;
+  margin-top: 4px;
+  border-top: 2px solid var(--line);
+}
+.totals-total .name { font-size: 13.5px; font-weight: 700; color: var(--text-primary); }
+.totals-total .value { font-size: 16px; font-weight: 700; color: var(--text-primary); font-variant-numeric: tabular-nums; }
+
+</style>
+</head>
+<body>
+
+<div class="browser-frame">
+
+  <div class="browser-chrome">
+    <div class="traffic-lights">
+      <span class="tl-red"></span><span class="tl-yellow"></span><span class="tl-green"></span>
+    </div>
+    <div class="browser-tabs">
+      <div class="browser-tab active">run_8823 · flight path replay · Claude Wrapper</div>
+    </div>
+    <div class="address-bar">app.claudewrapper.dev/runs/run_8823/audit/replay</div>
+  </div>
+
+  <div class="viewport">
+
+    <div class="app-header">
+      <div class="app-header-left">
+        <span class="wordmark">Claude Wrapper</span>
+        <span class="breadcrumb">Post-run audit<span class="sep">›</span><strong>Flight path replay</strong> — add OAuth2 login with JWT</span>
+      </div>
+      <div class="app-header-right">
+        <button class="btn" type="button">Back to summary</button>
+        <button class="btn primary" type="button">Export summary</button>
+      </div>
+    </div>
+
+    <div class="replay-subbar">
+      <span class="replay-badge-lg"><span class="sq"></span>Replay — historical view, not live</span>
+      <span class="replay-subbar-note">Static snapshot of run_8823, completed 41 minutes ago. Nothing on this page is executing — positions, statuses, and token figures are frozen at run end.</span>
+    </div>
+
+    <div class="main-row">
+
+      <div class="canvas-panel">
+        <div class="canvas-panel-heading">
+          <h2>Flight path<span class="sub">full replay · 5 agents · 6 context nodes shown for auth_scaffold_worker</span></h2>
+          <div class="legend">
+            <div class="legend-item"><span class="swatch" style="background:#27AE60"></span>completed</div>
+            <div class="legend-item"><span class="swatch dash"></span>trouble (recovered)</div>
+            <div class="legend-item"><span class="swatch line-cancel"></span>cancelled / off route</div>
+          </div>
+        </div>
+
+        <div class="canvas">
+          <svg viewBox="0 0 940 1180" preserveAspectRatio="none">
+            <!-- static historical route: solid lines, no pulse/animation — this is the frozen record, not a live tick -->
+            <line x1="470" y1="118" x2="190" y2="170" stroke="var(--accent)" stroke-width="3" />
+            <line x1="470" y1="118" x2="470" y2="170" stroke="var(--accent)" stroke-width="3" />
+            <line x1="470" y1="118" x2="750" y2="170" stroke="var(--accent)" stroke-width="3" />
+            <!-- orchestrator -> jwt_test_writer: cancelled, shown dashed/grey, off the executed route -->
+            <line x1="470" y1="118" x2="750" y2="330" stroke="#9B9BAA" stroke-width="2.5" stroke-dasharray="6 6" />
+
+            <!-- auth_scaffold_worker's context-node chain -->
+            <line x1="470" y1="268" x2="470" y2="322" stroke="var(--accent)" stroke-width="2.5" />
+            <line x1="470" y1="422" x2="470" y2="452" stroke="var(--accent)" stroke-width="2.5" />
+            <!-- detour into trouble -->
+            <line x1="470" y1="552" x2="566" y2="592" stroke="var(--status-trouble)" stroke-width="3" stroke-dasharray="6 5" />
+            <!-- resumed after Dana's decision, back on the main line -->
+            <line x1="566" y1="732" x2="470" y2="772" stroke="var(--status-completed)" stroke-width="3" />
+            <line x1="470" y1="872" x2="470" y2="912" stroke="var(--accent)" stroke-width="2.5" />
+            <line x1="470" y1="1012" x2="470" y2="1052" stroke="var(--accent)" stroke-width="2.5" />
+          </svg>
+
+          <!-- context-node lane background (groups auth_scaffold_worker's steps) -->
+          <div style="position:absolute; left:340px; top:296px; width:320px; height:868px; border-radius:24px; background:rgba(45,156,219,.045); border:1.5px dashed #CFE0EE; z-index:1;"></div>
+          <div class="ctx-lane-header" style="left:340px; top:298px; width:320px;">auth_scaffold_worker — 6 context nodes, in order</div>
+
+          <!-- orchestrator -->
+          <div class="rp-node st-completed" style="left:370px; top:20px;">
+            <div class="rp-node-status-bar"></div>
+            <div class="rp-node-name">Orchestrator</div>
+            <div class="rp-node-role">main run coordinator</div>
+            <div class="rp-node-foot">
+              <span class="rp-status-chip"><span class="dot"></span>completed</span>
+              <span class="rp-token-figure"><strong>4.3k</strong>/ 4.0k est.</span>
+            </div>
+          </div>
+
+          <!-- backend_planner -->
+          <div class="rp-node st-completed" style="left:90px; top:170px;">
+            <div class="rp-node-status-bar"></div>
+            <div class="rp-node-name">backend_planner</div>
+            <div class="rp-node-role">designed auth module layout</div>
+            <div class="rp-node-foot">
+              <span class="rp-status-chip"><span class="dot"></span>completed</span>
+              <span class="rp-token-figure"><strong>9.8k</strong>/ 12.0k est.</span>
+            </div>
+          </div>
+
+          <!-- auth_scaffold_worker: agent-level header box, detail continues below as context nodes -->
+          <div class="rp-node st-completed" style="left:370px; top:170px;">
+            <div class="rp-node-status-bar"></div>
+            <div class="rp-node-name">auth_scaffold_worker</div>
+            <div class="rp-node-role">scaffolded JWT auth code — see 6 steps below</div>
+            <div class="rp-node-foot">
+              <span class="rp-status-chip"><span class="dot"></span>completed</span>
+              <span class="rp-token-figure"><strong>27.3k</strong>/ 16.0k est.</span>
+            </div>
+          </div>
+
+          <!-- token_refresh_worker -->
+          <div class="rp-node st-completed" style="left:650px; top:170px;">
+            <div class="rp-node-status-bar"></div>
+            <div class="rp-node-name">token_refresh_worker</div>
+            <div class="rp-node-role">refresh-token rotation</div>
+            <div class="rp-node-foot">
+              <span class="rp-status-chip"><span class="dot"></span>completed</span>
+              <span class="rp-token-figure"><strong>8.4k</strong>/ 9.0k est.</span>
+            </div>
+          </div>
+
+          <!-- jwt_test_writer: cancelled, dashed, off the executed route -->
+          <div class="rp-node st-cancelled" style="left:650px; top:330px;">
+            <div class="rp-node-status-bar"></div>
+            <div class="rp-node-name">jwt_test_writer</div>
+            <div class="rp-node-role">writes auth test suite — cancelled 1m 53s in</div>
+            <div class="rp-node-foot">
+              <span class="rp-status-chip"><span class="dot"></span>cancelled</span>
+              <span class="rp-token-figure"><strong>6.4k</strong>spent, not counted</span>
+            </div>
+            <span class="rp-node-offroute-tag">Redundant once auth_scaffold_worker's own tests covered the login flow.</span>
+          </div>
+
+          <!-- ctx1 -->
+          <div class="ctx-node" style="left:375px; top:322px;">
+            <span class="ctx-index">1</span>
+            <span class="ctx-tag">context node</span>
+            <div class="ctx-title">Read: routes &amp; models context</div>
+            <div class="ctx-token-row">
+              <span class="ctx-token-figures"><strong>4.1k</strong> tok</span>
+              <span class="ctx-bar"><span style="width:66%"></span></span>
+            </div>
+          </div>
+
+          <!-- ctx2 -->
+          <div class="ctx-node" style="left:375px; top:452px;">
+            <span class="ctx-index">2</span>
+            <span class="ctx-tag">context node</span>
+            <div class="ctx-title">Draft: jwt.py, first pass</div>
+            <div class="ctx-token-row">
+              <span class="ctx-token-figures"><strong>6.2k</strong> tok</span>
+              <span class="ctx-bar"><span style="width:100%"></span></span>
+            </div>
+          </div>
+
+          <!-- ctx3: trouble -->
+          <div class="ctx-node trouble" style="left:470px; top:592px;">
+            <span class="ctx-index">3</span>
+            <span class="ctx-tag">trouble · needs decision</span>
+            <div class="ctx-title">Signing-key permission scope unclear</div>
+            <div class="ctx-note">Dana approved the requested scope 3m 41s in.</div>
+            <div class="ctx-token-row">
+              <span class="ctx-token-figures"><strong>2.8k</strong> tok</span>
+              <span class="ctx-bar"><span style="width:45%"></span></span>
+            </div>
+          </div>
+
+          <!-- ctx4: resumed -->
+          <div class="ctx-node resumed" style="left:375px; top:772px;">
+            <span class="ctx-index">4</span>
+            <span class="ctx-tag">resumed</span>
+            <div class="ctx-title">Implement approved signing-key scope</div>
+            <div class="ctx-token-row">
+              <span class="ctx-token-figures"><strong>5.4k</strong> tok</span>
+              <span class="ctx-bar"><span style="width:87%"></span></span>
+            </div>
+          </div>
+
+          <!-- ctx5 -->
+          <div class="ctx-node" style="left:375px; top:912px;">
+            <span class="ctx-index">5</span>
+            <span class="ctx-tag">context node</span>
+            <div class="ctx-title">Write: oauth2.py</div>
+            <div class="ctx-token-row">
+              <span class="ctx-token-figures"><strong>5.9k</strong> tok</span>
+              <span class="ctx-bar"><span style="width:95%"></span></span>
+            </div>
+          </div>
+
+          <!-- ctx6 -->
+          <div class="ctx-node" style="left:375px; top:1052px;">
+            <span class="ctx-index">6</span>
+            <span class="ctx-tag">context node</span>
+            <div class="ctx-title">Finalize: auth_routes.py, remove legacy_session.py</div>
+            <div class="ctx-token-row">
+              <span class="ctx-token-figures"><strong>2.9k</strong> tok</span>
+              <span class="ctx-bar"><span style="width:47%"></span></span>
+            </div>
+          </div>
+
+          <div class="route-label historical" style="left:20px; top:130px;">historical route</div>
+          <div class="route-label offroute" style="left:678px; top:230px;">cancelled, off route</div>
+
+        </div>
+      </div>
+
+      <div class="sidebar">
+        <h2>Token totals</h2>
+        <div class="sub">per agent · replay snapshot</div>
+
+        <div class="totals-row st-completed">
+          <div class="totals-row-head">
+            <span class="status-dot"></span>
+            <div class="totals-row-body">
+              <div class="totals-row-name">Orchestrator</div>
+              <div class="totals-row-figures">
+                <span class="totals-row-tokens">4.3k <span class="vs">/ 4.0k est.</span></span>
+                <span class="totals-delta over">+8%</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="totals-row st-completed">
+          <div class="totals-row-head">
+            <span class="status-dot"></span>
+            <div class="totals-row-body">
+              <div class="totals-row-name">backend_planner</div>
+              <div class="totals-row-figures">
+                <span class="totals-row-tokens">9.8k <span class="vs">/ 12.0k est.</span></span>
+                <span class="totals-delta under">&minus;18%</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="totals-row st-completed">
+          <div class="totals-row-head">
+            <span class="status-dot"></span>
+            <div class="totals-row-body">
+              <div class="totals-row-name">auth_scaffold_worker</div>
+              <div class="totals-row-figures">
+                <span class="totals-row-tokens">27.3k <span class="vs">/ 16.0k est.</span></span>
+                <span class="totals-delta over">+71%</span>
+              </div>
+            </div>
+          </div>
+          <ul class="ctx-breakdown">
+            <li><span>1 · read routes &amp; models</span><strong>4.1k</strong></li>
+            <li><span>2 · draft jwt.py</span><strong>6.2k</strong></li>
+            <li class="detour-line"><span>3 · trouble: signing-key scope</span><strong>2.8k</strong></li>
+            <li><span>4 · resumed, implement fix</span><strong>5.4k</strong></li>
+            <li><span>5 · write oauth2.py</span><strong>5.9k</strong></li>
+            <li><span>6 · finalize + cleanup</span><strong>2.9k</strong></li>
+          </ul>
+        </div>
+
+        <div class="totals-row st-completed">
+          <div class="totals-row-head">
+            <span class="status-dot"></span>
+            <div class="totals-row-body">
+              <div class="totals-row-name">token_refresh_worker</div>
+              <div class="totals-row-figures">
+                <span class="totals-row-tokens">8.4k <span class="vs">/ 9.0k est.</span></span>
+                <span class="totals-delta under">&minus;7%</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="totals-row cancelled-row st-cancelled">
+          <div class="totals-row-head">
+            <span class="status-dot"></span>
+            <div class="totals-row-body">
+              <div class="totals-row-name">jwt_test_writer</div>
+              <div class="totals-row-figures">
+                <span class="totals-row-tokens">6.4k <span class="vs">spent</span></span>
+              </div>
+              <div class="totals-note">Cancelled 1m 53s in; est. 11.0k if completed.</div>
+              <span class="not-counted-pill">Not counted in total</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="totals-total">
+          <span class="name">Total (completed work)</span>
+          <span class="value">49.8k</span>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

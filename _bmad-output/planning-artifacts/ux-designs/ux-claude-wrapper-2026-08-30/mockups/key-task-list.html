@@ -1,0 +1,673 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Claude Wrapper — Task List</title>
+<style>
+/*
+  illustrates (DESIGN.md / EXPERIENCE.md, FR-12: live task list for orchestrator + every subagent):
+  - Component Patterns (task-list row: agent identity, one-line action summary, status badge, action cluster)
+  - State Patterns (planned/queued preview state vs live per-status state: executing / completed / trouble / waiting_input;
+    non-terminal vs terminal agents; open-question flag as a per-agent boolean, not a global status)
+  - Interaction Primitives (view-graph jump-to-DAG action; stop as an always-available HITL control on any
+    non-terminal agent; question button that only renders when that agent actually has an open question)
+  - Colors (node status palette: waiting_input / executing / trouble / completed / cancelled / failed — light mode tokens)
+  - Typography (system font for agent names/summaries; monospace reserved strictly for literal file paths)
+  - Elevation (0 2px 8px rgba(0,0,0,.05) task cards; 0 6px 24px rgba(45,156,219,.10) frame-level panel)
+  - Accessibility (visible focus-ring on every interactive button; real contrast on status text, not color alone)
+*/
+
+:root {
+  --bg: #FFF8F0;
+  --surface: #FFFFFF;
+  --accent: #2D9CDB;
+  --text-primary: #1A1A2E;
+  --text-secondary: #6B6B7D;
+
+  --status-waiting: #F5A623;
+  --status-executing: #2D9CDB;
+  --status-trouble: #FF8C42;
+  --status-completed: #27AE60;
+  --status-cancelled: #9B9BAA;
+  --status-failed: #E74C3C;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: #E7E5DE;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+
+body { padding: 28px 16px; display: flex; justify-content: center; }
+
+/* ---- browser device frame ---- */
+.browser-frame {
+  width: min(1320px, 98vw);
+  background: var(--surface);
+  border-radius: 14px;
+  overflow: hidden;
+  border: 1px solid #E4E1D8;
+  box-shadow: 0 6px 24px rgba(45,156,219,.10), 0 1px 3px rgba(0,0,0,.06);
+}
+
+.browser-chrome {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 11px 16px;
+  background: #F2EFE9;
+  border-bottom: 1px solid #E4E1D8;
+}
+.traffic-lights { display: flex; gap: 8px; flex-shrink: 0; }
+.traffic-lights span { width: 11px; height: 11px; border-radius: 50%; display: inline-block; }
+.tl-red { background: #FF5F57; }
+.tl-yellow { background: #FEBC2E; }
+.tl-green { background: #28C840; }
+.browser-tabs { display: flex; gap: 6px; margin-right: 8px; }
+.browser-tab {
+  font-size: 12px; color: var(--text-secondary);
+  background: #FFFFFF; border: 1px solid #E4E1D8; border-bottom: none;
+  padding: 5px 12px; border-radius: 8px 8px 0 0;
+}
+.browser-tab.active { color: var(--text-primary); font-weight: 600; }
+.address-bar {
+  flex: 1; background: #FFFFFF; border: 1px solid #E4E1D8;
+  border-radius: 999px; padding: 6px 16px; font-size: 12.5px; color: var(--text-secondary);
+}
+
+/* ---- app viewport ---- */
+.viewport { background: var(--bg); }
+
+.app-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 18px 32px;
+  border-bottom: 1px solid #EFE7DA;
+  background: var(--surface);
+}
+.app-header-left { display: flex; align-items: baseline; gap: 14px; min-width: 0; }
+.wordmark {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+.wordmark::before {
+  content: "";
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  margin-right: 8px;
+}
+.page-label {
+  font-size: 15px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+.page-label strong { color: var(--text-primary); font-weight: 600; }
+.run-title-chip {
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  background: var(--bg);
+  border: 1px solid #EFE7DA;
+  padding: 5px 12px;
+  border-radius: 999px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.run-title-chip strong { color: var(--text-primary); font-weight: 600; }
+
+/* ---- content ---- */
+.content {
+  padding: 28px 32px 48px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.state-section { padding: 20px 0 8px; }
+
+.state-eyebrow {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+  margin-bottom: 7px;
+}
+.state-eyebrow.is-live { color: #1D6FA0; }
+
+.state-heading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.state-heading h1 {
+  font-size: 21px;
+  margin: 0;
+  color: var(--text-primary);
+  font-weight: 700;
+}
+.state-snapshot-tag {
+  font-size: 11.5px;
+  font-weight: 600;
+  padding: 4px 11px;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 1px solid #EFE7DA;
+  color: var(--text-secondary);
+}
+
+.state-desc {
+  font-size: 13.5px;
+  color: var(--text-secondary);
+  max-width: 740px;
+  line-height: 1.55;
+  margin: 8px 0 22px;
+}
+.state-desc strong { color: var(--text-primary); font-weight: 600; }
+
+/* legend, live section only */
+.status-legend {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin: -8px 0 20px;
+}
+.status-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+  color: var(--text-secondary);
+}
+.status-legend-item .swatch { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+
+/* ---- transition divider between the two states ---- */
+.transition-divider {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 18px 0 6px;
+}
+.transition-divider .line { flex: 1; height: 1px; background: #E4DFD0; }
+.transition-divider .label {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: var(--surface);
+  border: 1px solid #E4DFD0;
+  padding: 7px 16px;
+  border-radius: 999px;
+}
+.transition-divider .label .arrow { color: var(--accent); font-weight: 700; }
+
+/* ---- task list ---- */
+.task-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.task-card {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  border-radius: 18px;
+  padding: 16px 20px;
+}
+.task-card.is-planned {
+  background: var(--surface);
+  border: 1.5px dashed #D9D2C0;
+  box-shadow: none;
+}
+.task-card.is-live {
+  background: var(--surface);
+  border: 1px solid #EFE7DA;
+  box-shadow: 0 2px 8px rgba(0,0,0,.05);
+}
+/* live card in trouble/waiting gets a soft ring to draw the eye without relying on color alone */
+.task-card.is-live.needs-attention {
+  box-shadow: 0 2px 8px rgba(0,0,0,.05), 0 0 0 2px rgba(255,140,66,.30);
+}
+.task-card.is-live.needs-input {
+  box-shadow: 0 2px 8px rgba(0,0,0,.05), 0 0 0 2px rgba(245,166,35,.32);
+}
+
+.task-card-status {
+  flex-shrink: 0;
+  width: 6px;
+  align-self: stretch;
+  border-radius: 999px;
+  background: #E4DFD0;
+}
+.task-card.is-live.st-executing .task-card-status { background: var(--status-executing); }
+.task-card.is-live.st-completed .task-card-status { background: var(--status-completed); }
+.task-card.is-live.st-trouble .task-card-status { background: var(--status-trouble); }
+.task-card.is-live.st-waiting .task-card-status { background: var(--status-waiting); }
+
+.task-card-main { flex: 1; min-width: 0; }
+
+.task-card-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 5px;
+  flex-wrap: wrap;
+}
+.task-card-name { font-size: 15px; font-weight: 700; color: var(--text-primary); }
+.task-card-role { font-size: 12px; color: var(--text-secondary); }
+
+.status-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10.5px;
+  font-weight: 700;
+  padding: 3px 10px 3px 8px;
+  border-radius: 999px;
+  letter-spacing: 0.01em;
+}
+.status-chip .dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+
+.status-chip.is-planned { background: rgba(107,107,125,.12); color: #55536B; }
+.status-chip.is-planned .dot { background: #9B9BAA; }
+
+.status-chip.st-executing { background: rgba(45,156,219,.13); color: #1D6FA0; }
+.status-chip.st-executing .dot { background: var(--status-executing); }
+.status-chip.st-completed { background: rgba(39,174,96,.14); color: #1F7A45; }
+.status-chip.st-completed .dot { background: var(--status-completed); }
+.status-chip.st-trouble { background: rgba(255,140,66,.16); color: #B8571D; }
+.status-chip.st-trouble .dot { background: var(--status-trouble); }
+.status-chip.st-waiting { background: rgba(245,166,35,.16); color: #92600C; }
+.status-chip.st-waiting .dot { background: var(--status-waiting); }
+
+.task-card-summary {
+  font-size: 13.5px;
+  color: var(--text-primary);
+  line-height: 1.5;
+  margin-top: 1px;
+}
+
+.task-card-meta {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-top: 8px;
+}
+.task-card-meta .meta-item { display: flex; align-items: center; gap: 5px; }
+
+/* ---- action cluster ---- */
+.task-card-actions {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.act-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  padding: 8px 14px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.act-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.act-btn svg { flex-shrink: 0; }
+/* on press: 100ms ease scale(0.98) */
+
+.act-btn.graph {
+  background: var(--surface);
+  border-color: #CFE6F5;
+  color: #1D6FA0;
+}
+.act-btn.graph:hover { background: rgba(45,156,219,.08); }
+
+.act-btn.graph-preview {
+  background: transparent;
+  border: 1px dashed #CFC9B8;
+  color: var(--text-secondary);
+}
+.act-btn.graph-preview:hover { background: rgba(107,107,125,.06); }
+
+.act-btn.stop {
+  background: var(--surface);
+  border-color: rgba(231,76,60,.35);
+  color: #C0392B;
+}
+.act-btn.stop:hover { background: rgba(231,76,60,.08); }
+
+.act-btn.question {
+  background: rgba(245,166,35,.14);
+  border-color: rgba(245,166,35,.45);
+  color: #92600C;
+  font-weight: 700;
+}
+.act-btn.question:hover { background: rgba(245,166,35,.22); }
+/* has an unread open question: 1600ms ease-in-out opacity pulse on the dot only, never a hard blink */
+.act-btn.question .q-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--status-waiting);
+  flex-shrink: 0;
+}
+
+.no-actions-note {
+  flex-shrink: 0;
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  font-style: italic;
+  max-width: 150px;
+  text-align: right;
+  line-height: 1.4;
+}
+
+</style>
+</head>
+<body>
+
+<div class="browser-frame">
+
+  <div class="browser-chrome">
+    <div class="traffic-lights">
+      <span class="tl-red"></span><span class="tl-yellow"></span><span class="tl-green"></span>
+    </div>
+    <div class="browser-tabs">
+      <div class="browser-tab active">run_8823 · Tasks · Claude Wrapper</div>
+    </div>
+    <div class="address-bar">app.claudewrapper.dev/runs/run_8823/tasks</div>
+  </div>
+
+  <div class="viewport">
+
+    <div class="app-header">
+      <div class="app-header-left">
+        <span class="wordmark">Claude Wrapper</span>
+        <span class="page-label">Task list — every agent working <strong>add OAuth2 login with JWT</strong></span>
+      </div>
+      <div class="run-title-chip">Orchestrator + 3 subagents</div>
+    </div>
+
+    <div class="content">
+
+      <!-- ===================== STATE 1 — BEFORE EXECUTION ===================== -->
+      <div class="state-section">
+        <div class="state-eyebrow">State 1 · Preview, not yet running</div>
+        <div class="state-heading">
+          <h1>Before execution (planned)</h1>
+          <span class="state-snapshot-tag">Snapshot: right after planning, before Pre-Flight approval</span>
+        </div>
+        <p class="state-desc">
+          Dana submitted the task and the Meta-Planner just finished breaking it into agents. She hasn't
+          approved the Pre-Flight checklist yet, so <strong>nothing has started</strong> — this is what the
+          plan looks like before any tokens are spent. Estimates only; no live status, no Stop control
+          (there's nothing running to stop yet).
+        </p>
+
+        <div class="task-list">
+
+          <div class="task-card is-planned">
+            <div class="task-card-status"></div>
+            <div class="task-card-main">
+              <div class="task-card-top">
+                <span class="task-card-name">Orchestrator</span>
+                <span class="task-card-role">main run coordinator</span>
+                <span class="status-chip is-planned"><span class="dot"></span>planned</span>
+              </div>
+              <div class="task-card-summary">Will coordinate 3 subagents through planning, scaffolding, and token-refresh work, in that order.</div>
+              <div class="task-card-meta">
+                <span class="meta-item">~6k tokens est.</span>
+                <span class="meta-item">not started</span>
+              </div>
+            </div>
+            <div class="task-card-actions">
+              <button class="act-btn graph-preview" type="button">
+                <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><circle cx="3" cy="3" r="2" stroke="currentColor" stroke-width="1.3"/><circle cx="10" cy="3" r="2" stroke="currentColor" stroke-width="1.3"/><circle cx="6.5" cy="10" r="2" stroke="currentColor" stroke-width="1.3"/><path d="M4.7 4.2L5.7 8.2M8.3 4.2L7.3 8.2" stroke="currentColor" stroke-width="1.1"/></svg>
+                Preview graph
+              </button>
+            </div>
+          </div>
+
+          <div class="task-card is-planned">
+            <div class="task-card-status"></div>
+            <div class="task-card-main">
+              <div class="task-card-top">
+                <span class="task-card-name">backend_planner</span>
+                <span class="task-card-role">designs auth module layout</span>
+                <span class="status-chip is-planned"><span class="dot"></span>planned</span>
+              </div>
+              <div class="task-card-summary">Will read src/auth/ and lay out the OAuth2 module structure before any code is written.</div>
+              <div class="task-card-meta">
+                <span class="meta-item">~9k tokens est.</span>
+                <span class="meta-item">not started</span>
+              </div>
+            </div>
+            <div class="task-card-actions">
+              <button class="act-btn graph-preview" type="button">
+                <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><circle cx="3" cy="3" r="2" stroke="currentColor" stroke-width="1.3"/><circle cx="10" cy="3" r="2" stroke="currentColor" stroke-width="1.3"/><circle cx="6.5" cy="10" r="2" stroke="currentColor" stroke-width="1.3"/><path d="M4.7 4.2L5.7 8.2M8.3 4.2L7.3 8.2" stroke="currentColor" stroke-width="1.1"/></svg>
+                Preview graph
+              </button>
+            </div>
+          </div>
+
+          <div class="task-card is-planned">
+            <div class="task-card-status"></div>
+            <div class="task-card-main">
+              <div class="task-card-top">
+                <span class="task-card-name">auth_scaffold_worker</span>
+                <span class="task-card-role">scaffolds JWT auth code</span>
+                <span class="status-chip is-planned"><span class="dot"></span>planned</span>
+              </div>
+              <div class="task-card-summary">Will create the login/callback routes and the JWT issuing module once approved.</div>
+              <div class="task-card-meta">
+                <span class="meta-item">~20k tokens est.</span>
+                <span class="meta-item">not started</span>
+              </div>
+            </div>
+            <div class="task-card-actions">
+              <button class="act-btn graph-preview" type="button">
+                <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><circle cx="3" cy="3" r="2" stroke="currentColor" stroke-width="1.3"/><circle cx="10" cy="3" r="2" stroke="currentColor" stroke-width="1.3"/><circle cx="6.5" cy="10" r="2" stroke="currentColor" stroke-width="1.3"/><path d="M4.7 4.2L5.7 8.2M8.3 4.2L7.3 8.2" stroke="currentColor" stroke-width="1.1"/></svg>
+                Preview graph
+              </button>
+            </div>
+          </div>
+
+          <div class="task-card is-planned">
+            <div class="task-card-status"></div>
+            <div class="task-card-main">
+              <div class="task-card-top">
+                <span class="task-card-name">token_refresh_worker</span>
+                <span class="task-card-role">refresh-token rotation</span>
+                <span class="status-chip is-planned"><span class="dot"></span>planned</span>
+              </div>
+              <div class="task-card-summary">Will implement refresh-token rotation and expiry handling after scaffolding lands.</div>
+              <div class="task-card-meta">
+                <span class="meta-item">~11k tokens est.</span>
+                <span class="meta-item">not started</span>
+              </div>
+            </div>
+            <div class="task-card-actions">
+              <button class="act-btn graph-preview" type="button">
+                <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><circle cx="3" cy="3" r="2" stroke="currentColor" stroke-width="1.3"/><circle cx="10" cy="3" r="2" stroke="currentColor" stroke-width="1.3"/><circle cx="6.5" cy="10" r="2" stroke="currentColor" stroke-width="1.3"/><path d="M4.7 4.2L5.7 8.2M8.3 4.2L7.3 8.2" stroke="currentColor" stroke-width="1.1"/></svg>
+                Preview graph
+              </button>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- ===================== TRANSITION ===================== -->
+      <div class="transition-divider">
+        <span class="line"></span>
+        <span class="label"><span class="arrow">→</span> Dana approves the Pre-Flight checklist — the run starts</span>
+        <span class="line"></span>
+      </div>
+
+      <!-- ===================== STATE 2 — DURING EXECUTION ===================== -->
+      <div class="state-section">
+        <div class="state-eyebrow is-live">State 2 · Live</div>
+        <div class="state-heading">
+          <h1>During execution (live)</h1>
+          <span class="state-snapshot-tag">Snapshot: t + 6m 12s into the run</span>
+        </div>
+        <p class="state-desc">
+          Same run, now running. Every row shows a real status, a one-line summary of what that agent is
+          doing right now, and a <strong>Stop</strong> control — available on any agent that isn't already
+          finished or cancelled. The <strong>question badge</strong> only shows up on
+          <strong>token_refresh_worker</strong>, because it's the only agent currently blocked on Dana.
+        </p>
+
+        <div class="status-legend">
+          <div class="status-legend-item"><span class="swatch" style="background:#F5A623"></span>waiting_input</div>
+          <div class="status-legend-item"><span class="swatch" style="background:#2D9CDB"></span>executing</div>
+          <div class="status-legend-item"><span class="swatch" style="background:#FF8C42"></span>trouble</div>
+          <div class="status-legend-item"><span class="swatch" style="background:#27AE60"></span>completed</div>
+          <div class="status-legend-item"><span class="swatch" style="background:#9B9BAA"></span>cancelled</div>
+          <div class="status-legend-item"><span class="swatch" style="background:#E74C3C"></span>failed</div>
+        </div>
+
+        <div class="task-list">
+
+          <!-- Orchestrator: executing, non-terminal -> Stop shown -->
+          <div class="task-card is-live st-executing">
+            <div class="task-card-status"></div>
+            <div class="task-card-main">
+              <div class="task-card-top">
+                <span class="task-card-name">Orchestrator</span>
+                <span class="task-card-role">main run coordinator</span>
+                <span class="status-chip st-executing"><span class="dot"></span>executing</span>
+              </div>
+              <div class="task-card-summary">Coordinating subagents — currently waiting on auth_scaffold_worker before handing off to token_refresh_worker.</div>
+              <div class="task-card-meta">
+                <span class="meta-item">12.1k tokens</span>
+                <span class="meta-item">running 6m 12s</span>
+              </div>
+            </div>
+            <div class="task-card-actions">
+              <button class="act-btn graph" type="button">
+                <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><circle cx="3" cy="3" r="2" stroke="currentColor" stroke-width="1.3"/><circle cx="10" cy="3" r="2" stroke="currentColor" stroke-width="1.3"/><circle cx="6.5" cy="10" r="2" stroke="currentColor" stroke-width="1.3"/><path d="M4.7 4.2L5.7 8.2M8.3 4.2L7.3 8.2" stroke="currentColor" stroke-width="1.1"/></svg>
+                View graph
+              </button>
+              <button class="act-btn stop" type="button">
+                <svg width="11" height="11" viewBox="0 0 11 11"><rect x="0.5" y="0.5" width="10" height="10" rx="2" fill="currentColor"/></svg>
+                Stop
+              </button>
+            </div>
+          </div>
+
+          <!-- backend_planner: completed, terminal -> no Stop -->
+          <div class="task-card is-live st-completed">
+            <div class="task-card-status"></div>
+            <div class="task-card-main">
+              <div class="task-card-top">
+                <span class="task-card-name">backend_planner</span>
+                <span class="task-card-role">designs auth module layout</span>
+                <span class="status-chip st-completed"><span class="dot"></span>completed</span>
+              </div>
+              <div class="task-card-summary">Finished laying out the OAuth2 module and handed off to auth_scaffold_worker.</div>
+              <div class="task-card-meta">
+                <span class="meta-item">9.8k tokens</span>
+                <span class="meta-item">done in 2m 04s</span>
+              </div>
+            </div>
+            <div class="task-card-actions">
+              <button class="act-btn graph" type="button">
+                <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><circle cx="3" cy="3" r="2" stroke="currentColor" stroke-width="1.3"/><circle cx="10" cy="3" r="2" stroke="currentColor" stroke-width="1.3"/><circle cx="6.5" cy="10" r="2" stroke="currentColor" stroke-width="1.3"/><path d="M4.7 4.2L5.7 8.2M8.3 4.2L7.3 8.2" stroke="currentColor" stroke-width="1.1"/></svg>
+                View graph
+              </button>
+              <span class="no-actions-note">Finished — nothing to stop</span>
+            </div>
+          </div>
+
+          <!-- auth_scaffold_worker: trouble, non-terminal -> Stop shown, no open question -->
+          <div class="task-card is-live st-trouble needs-attention">
+            <div class="task-card-status"></div>
+            <div class="task-card-main">
+              <div class="task-card-top">
+                <span class="task-card-name">auth_scaffold_worker</span>
+                <span class="task-card-role">scaffolds JWT auth code</span>
+                <span class="status-chip st-trouble"><span class="dot"></span>trouble</span>
+              </div>
+              <div class="task-card-summary">Hit a repeated test failure writing the JWT verification middleware — retrying with a narrower diff.</div>
+              <div class="task-card-meta">
+                <span class="meta-item">18.4k tokens</span>
+                <span class="meta-item">running 3m 41s</span>
+              </div>
+            </div>
+            <div class="task-card-actions">
+              <button class="act-btn graph" type="button">
+                <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><circle cx="3" cy="3" r="2" stroke="currentColor" stroke-width="1.3"/><circle cx="10" cy="3" r="2" stroke="currentColor" stroke-width="1.3"/><circle cx="6.5" cy="10" r="2" stroke="currentColor" stroke-width="1.3"/><path d="M4.7 4.2L5.7 8.2M8.3 4.2L7.3 8.2" stroke="currentColor" stroke-width="1.1"/></svg>
+                View graph
+              </button>
+              <button class="act-btn stop" type="button">
+                <svg width="11" height="11" viewBox="0 0 11 11"><rect x="0.5" y="0.5" width="10" height="10" rx="2" fill="currentColor"/></svg>
+                Stop
+              </button>
+            </div>
+          </div>
+
+          <!-- token_refresh_worker: waiting_input, non-terminal + open question -> Stop and Question both shown -->
+          <div class="task-card is-live st-waiting needs-input">
+            <div class="task-card-status"></div>
+            <div class="task-card-main">
+              <div class="task-card-top">
+                <span class="task-card-name">token_refresh_worker</span>
+                <span class="task-card-role">refresh-token rotation</span>
+                <span class="status-chip st-waiting"><span class="dot"></span>waiting_input</span>
+              </div>
+              <div class="task-card-summary">Blocked on a decision: rotate the refresh token on every request, or only on expiry?</div>
+              <div class="task-card-meta">
+                <span class="meta-item">2.6k tokens</span>
+                <span class="meta-item">waiting 1m 08s</span>
+              </div>
+            </div>
+            <div class="task-card-actions">
+              <button class="act-btn graph" type="button">
+                <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><circle cx="3" cy="3" r="2" stroke="currentColor" stroke-width="1.3"/><circle cx="10" cy="3" r="2" stroke="currentColor" stroke-width="1.3"/><circle cx="6.5" cy="10" r="2" stroke="currentColor" stroke-width="1.3"/><path d="M4.7 4.2L5.7 8.2M8.3 4.2L7.3 8.2" stroke="currentColor" stroke-width="1.1"/></svg>
+                View graph
+              </button>
+              <button class="act-btn stop" type="button">
+                <svg width="11" height="11" viewBox="0 0 11 11"><rect x="0.5" y="0.5" width="10" height="10" rx="2" fill="currentColor"/></svg>
+                Stop
+              </button>
+              <button class="act-btn question" type="button">
+                <span class="q-dot"></span>
+                1 open question
+              </button>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

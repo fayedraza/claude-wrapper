@@ -1,0 +1,26 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//Users/fayedraza/claude-wrapper/**)",
+      "Bash(uv run *)",
+      "Bash(cd *)",
+      "Bash(grep -n '  \\\\$\\\\|\\\\t')",
+      "Bash(grep -v '^\\\\s*$')",
+      "Bash(grep -n \" $\" prd.md)",
+      "Bash(awk '/^#### FR-/{fr=$0; found=0} /Realizes UJ/{found=1} /^#### FR-/{if\\(prev!=\"\"\\) print \\(prevfound?\"HAS\":\"MISSING\"\\), prev; prev=fr; prevfound=0} /Realizes UJ/{prevfound=1} END{print \\(prevfound?\"HAS\":\"MISSING\"\\), prev}' prd.md)",
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\(d['total_words']\\); print\\([s for s in d['sections'] if 'Vision' in s['heading']]\\)\")",
+      "WebSearch",
+      "Bash(open *)",
+      "Bash(python3 *)",
+      "Skill(browser-automation)",
+      "Bash(node *)",
+      "Bash(awk '/<\\\\/style>/{flag=1} flag' /Users/fayedraza/claude-wrapper/_bmad-output/planning-artifacts/ux-designs/ux-claude-wrapper-2026-08-30/.working/key-settings.html)",
+      "Bash(grep -oE '>[A-Za-z][^<]{3,80}<')",
+      "Bash(mkdir -p /Users/fayedraza/claude-wrapper/_bmad-output/planning-artifacts/ux-designs/ux-claude-wrapper-2026-08-30/mockups)",
+      "Bash(mv key-intent-submission.html key-task-list.html key-dag-canvas.html key-preflight-checklist.html key-node-inspector.html key-question-response.html key-post-run-audit.html key-flight-path-full.html key-settings.html ../mockups/)",
+      "Bash(command -v npx)",
+      "Bash(npx -y @mermaid-js/mermaid-cli --version)",
+      "Bash(npx -y @mermaid-js/mermaid-cli -i /tmp/ia-diagram.mmd -o /tmp/ia-diagram.svg)"
+    ]
+  }
+}
