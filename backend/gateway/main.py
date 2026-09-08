@@ -16,6 +16,7 @@ stories -- see
 `_bmad-output/planning-artifacts/architecture/architecture-claude-wrapper-2026-08-30/ARCHITECTURE-SPINE.md`.
 """
 
+import os
 from pathlib import Path
 
 import anthropic
@@ -60,8 +61,16 @@ app.add_middleware(
 
 # backend/gateway/main.py -> parents[1] is backend/, parents[2] is the repo
 # root, where the git-aware .claude/ control center Story 1.1 confirmed
-# lives. Overridable so tests never point this at the real repo's .claude/.
-DEFAULT_CLAUDE_DIR = Path(__file__).resolve().parents[2] / ".claude"
+# lives. Overridable two ways: pytest's TestClient-based tests override
+# get_claude_dir() in-process via dependency_overrides; a live server
+# process (e.g. an E2E test run driving a real browser against a real
+# backend, where dependency_overrides isn't reachable) instead sets
+# CLAUDE_WRAPPER_CLAUDE_DIR before startup to point at an isolated temp
+# directory -- without this, such a run would read and write this repo's
+# own real, git-tracked .claude/ (confirmed: .claude/settings.json is
+# tracked, not gitignored).
+_claude_dir_override = os.environ.get("CLAUDE_WRAPPER_CLAUDE_DIR")
+DEFAULT_CLAUDE_DIR = Path(_claude_dir_override) if _claude_dir_override else Path(__file__).resolve().parents[2] / ".claude"
 
 
 def get_claude_dir() -> Path:

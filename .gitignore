@@ -45,7 +45,14 @@ htmlcov/
 /blob-report/
 tests/.auth-sessions/
 _bmad-output/test-artifacts/playwright-junit.xml
+# The isolated .claude/ an E2E run's backend reads/writes (see
+# tests/support/e2e-claude-dir.ts) -- generated test data, cleared at the
+# start of every run, never meant to be committed.
+_bmad-output/test-artifacts/e2e-workspace/
 # Defensive: @seontechnologies/playwright-utils's configureAuthSession() has
 # ignored a custom storage path before and written here instead (upstream
 # bug — see tests/global-setup.ts).
 /.auth/
+# Playwright MCP session artifacts (screenshots, snapshots) from
+# browser-driven manual verification during development.
+.playwright-mcp/
