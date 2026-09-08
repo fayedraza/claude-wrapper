@@ -83,13 +83,22 @@ class CurrentConfiguration(BaseModel):
 
 # Story 1.4 (FR-6): flat per-resource permission grants -- one row per
 # resource (a file path or an MCP server name), never per-action rules.
-# Persisted only under `.claude/settings.local.json`'s `permissionGrants`
-# key (Boundaries: never `settings.json`, Claude Code's own reserved file).
 PermissionGrantKind = Literal["file", "mcp"]
+
+# Which settings file a grant lives in -- deliberately a separate, informal
+# vocabulary from TargetCategory's "team_instructions"/"local_instructions"
+# (same reasoning as ConfigKind above: distinct concepts, never conflated).
+# "local" = .claude/settings.local.json (personal, not committed); "team" =
+# .claude/settings.json (shared, committed -- the same file Claude Code's
+# own `hooks`/`permissions` keys live in, though this app never touches
+# those keys, only `permissionGrants`).
+GrantScope = Literal["local", "team"]
 
 
 class PermissionGrant(BaseModel):
-    """One persisted grant: `{id, kind, target}`."""
+    """One persisted grant: `{id, kind, target}`, tagged with which file it
+    lives in (`scope`) -- `scope` is derived from which file it was read
+    from, never itself persisted inside the JSON entry."""
 
     id: str = Field(description="Server-generated identifier, stable across reads/writes.")
     kind: PermissionGrantKind
@@ -98,6 +107,13 @@ class PermissionGrant(BaseModel):
             "Opaque identifier -- a file path or an MCP server name. Never "
             "validated for existence/reachability (Design Notes), only for "
             "non-empty-after-trim and a generous max length."
+        )
+    )
+    scope: GrantScope = Field(
+        description=(
+            "Which settings file this grant lives in -- 'local' "
+            "(.claude/settings.local.json, personal) or 'team' "
+            "(.claude/settings.json, shared)."
         )
     )
 
@@ -113,3 +129,15 @@ class AddPermissionGrantRequest(BaseModel):
 
     kind: PermissionGrantKind
     target: str
+    scope: GrantScope = "local"
+
+
+class UpdatePermissionGrantRequest(BaseModel):
+    """Request body for `PATCH /api/permission-grants/{id}`. All fields
+    optional -- only the provided ones change; omitted ones keep their
+    current value. Setting `scope` to the other value moves the grant
+    between `settings.local.json` and `settings.json`."""
+
+    kind: PermissionGrantKind | None = None
+    target: str | None = None
+    scope: GrantScope | None = None

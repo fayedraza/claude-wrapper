@@ -189,6 +189,27 @@ def test_apply_action_does_not_override_an_explicit_permission_grants_write(clau
     assert data["permissionGrants"] == new_grants
 
 
+def test_apply_action_preserves_permission_grants_on_unrelated_settings_json_change(claude_dir: Path) -> None:
+    """Same regression as the settings.local.json case above, now for team
+    scope: grants.py can persist `permissionGrants` in settings.json too
+    (Story 1.4 follow-up), so approving an unrelated change to *that* file
+    (e.g. a hooks/rule tweak) must not silently destroy team grants either."""
+    grant = add_grant(claude_dir, "file", "src/secrets.json", scope="team")
+
+    action = SettingAction(
+        target_category="settings.json",
+        file_path=".claude/settings.json",
+        content=json.dumps({"hooks": {"PreToolUse": []}}),
+        action="update",
+    )
+    apply_action(claude_dir, action)
+
+    remaining = list_grants(claude_dir).grants
+    assert remaining == [grant]
+    data = json.loads((claude_dir / "settings.json").read_text(encoding="utf-8"))
+    assert data["hooks"] == {"PreToolUse": []}
+
+
 def test_apply_action_raises_os_error_on_filesystem_failure(claude_dir: Path) -> None:
     """A path that collides with an existing directory of the same name fails at the
     filesystem level (IsADirectoryError, a subclass of OSError) -- apply_action must

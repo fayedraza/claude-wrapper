@@ -6,6 +6,8 @@ import {
   addPermissionGrant,
   listPermissionGrants,
   revokePermissionGrant,
+  updatePermissionGrant,
+  type GrantScope,
   type PermissionGrant,
   type PermissionGrantKind,
 } from "@/lib/permission-grants-api";
@@ -27,22 +29,28 @@ const FOCUSABLE_SELECTOR = 'button, [href], input, select, textarea, [tabindex]:
 
 /**
  * Permission Manager drawer (FR-6 + the standing half of FR-5): view, add,
- * and revoke permission grants. A new persistent header entry next to
- * Settings (UX-DR6) -- its own drawer + component tree, reusing only
- * Settings drawer's dialog chrome (backdrop, dialog role, focus trap,
- * Escape-to-close), never its propose/approve flow.
+ * move, and revoke permission grants -- across both `local`
+ * (`.claude/settings.local.json`, personal) and `team`
+ * (`.claude/settings.json`, shared, usually committed) scope. A new
+ * persistent header entry next to Settings (UX-DR6) -- its own drawer +
+ * component tree, reusing only Settings drawer's dialog chrome (backdrop,
+ * dialog role, focus trap, Escape-to-close), never its propose/approve
+ * flow.
  */
 export default function PermissionManagerDrawer({ open, onClose }: PermissionManagerDrawerProps) {
   const [grantsState, setGrantsState] = useState<GrantsState>({ phase: "idle" });
   const [kind, setKind] = useState<PermissionGrantKind>("file");
+  const [scope, setScope] = useState<GrantScope>("local");
   const [target, setTarget] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
-  // A Set, not a single id -- revoking a second grant while an earlier
-  // revoke is still in flight must not make the earlier row lose its
-  // "Revoking…" disabled/label state.
+  // Sets, not single ids -- acting on a second grant while an earlier
+  // action is still in flight must not make the earlier row lose its own
+  // disabled/label state.
   const [revokingIds, setRevokingIds] = useState<Set<string>>(new Set());
   const [revokeError, setRevokeError] = useState<string | null>(null);
+  const [movingIds, setMovingIds] = useState<Set<string>>(new Set());
+  const [moveError, setMoveError] = useState<string | null>(null);
 
   const dialogRef = useRef<HTMLDivElement>(null);
   const previouslyFocusedRef = useRef<HTMLElement | null>(null);
@@ -101,7 +109,8 @@ export default function PermissionManagerDrawer({ open, onClose }: PermissionMan
   async function loadGrants() {
     const requestId = ++requestIdRef.current;
     // Only blank the list to "Loading…" for the first fetch -- a refresh
-    // after revoke keeps the previous rows visible instead of flashing empty.
+    // after revoke/move keeps the previous rows visible instead of
+    // flashing empty.
     setGrantsState((prev) => (prev.phase === "loaded" ? prev : { phase: "loading" }));
     try {
       const result = await listPermissionGrants();
@@ -123,7 +132,7 @@ export default function PermissionManagerDrawer({ open, onClose }: PermissionMan
     setSubmitting(true);
     setSubmitError(null);
     try {
-      const grant = await addPermissionGrant(kind, trimmed);
+      const grant = await addPermissionGrant(kind, trimmed, scope);
       setTarget("");
       if (grantsState.phase !== "loaded") {
         // No reliable prior list to append to (e.g. the initial fetch
@@ -133,8 +142,9 @@ export default function PermissionManagerDrawer({ open, onClose }: PermissionMan
       } else {
         setGrantsState((prev) => {
           if (prev.phase !== "loaded") return prev;
-          // Add is idempotent (spec) -- the backend can return an
-          // already-existing grant rather than a new one; don't duplicate it.
+          // Add is idempotent within a scope (spec) -- the backend can
+          // return an already-existing grant rather than a new one; don't
+          // duplicate it.
           if (prev.grants.some((existing) => existing.id === grant.id)) return prev;
           return { phase: "loaded", grants: [...prev.grants, grant] };
         });
@@ -160,6 +170,33 @@ export default function PermissionManagerDrawer({ open, onClose }: PermissionMan
       void loadGrants();
     } finally {
       setRevokingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+    }
+  }
+
+  async function handleMove(id: string, newScope: GrantScope) {
+    setMovingIds((prev) => new Set(prev).add(id));
+    setMoveError(null);
+    try {
+      const updated = await updatePermissionGrant(id, { scope: newScope });
+      setGrantsState((prev) => {
+        if (prev.phase !== "loaded") return prev;
+        // Moving to a scope that already has an identical grant merges
+        // into it server-side (same idempotency rule as add) -- the
+        // response's id may differ from the one we moved. Drop both the
+        // moved-from row and any existing row for the merged-into id, then
+        // add the single resulting row back.
+        const withoutStale = prev.grants.filter((g) => g.id !== id && g.id !== updated.id);
+        return { phase: "loaded", grants: [...withoutStale, updated] };
+      });
+    } catch (error) {
+      setMoveError(error instanceof Error ? error.message : "Failed to move this grant.");
+      void loadGrants();
+    } finally {
+      setMovingIds((prev) => {
         const next = new Set(prev);
         next.delete(id);
         return next;
@@ -233,6 +270,23 @@ export default function PermissionManagerDrawer({ open, onClose }: PermissionMan
             />
           </div>
 
+          <div className="mt-space-2 flex items-center gap-space-2">
+            <select
+              value={scope}
+              onChange={(event) => setScope(event.target.value as GrantScope)}
+              aria-label="Save to"
+              className="rounded-md border-[1.5px] border-black/10 bg-bg px-space-3 py-space-2 text-small text-text1 focus-visible:border-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2 dark:border-white/10 dark:bg-bg-dark dark:text-text1-dark"
+            >
+              <option value="local">Personal (not shared)</option>
+              <option value="team">Team (shared)</option>
+            </select>
+            <p className="text-label leading-relaxed text-text2 dark:text-text2-dark">
+              {scope === "team"
+                ? "Saved to .claude/settings.json — shared with everyone on this project."
+                : "Saved to .claude/settings.local.json — stays on this machine."}
+            </p>
+          </div>
+
           <button
             type="button"
             onClick={handleAddGrant}
@@ -259,6 +313,12 @@ export default function PermissionManagerDrawer({ open, onClose }: PermissionMan
               </p>
             )}
 
+            {moveError && (
+              <p role="alert" className="mb-space-2 text-small text-status-failed dark:text-status-failed-dark">
+                {moveError}
+              </p>
+            )}
+
             {grantsState.phase === "loading" && (
               <p className="text-small text-text2 dark:text-text2-dark">Loading…</p>
             )}
@@ -282,7 +342,9 @@ export default function PermissionManagerDrawer({ open, onClose }: PermissionMan
                     key={grant.id}
                     grant={grant}
                     revoking={revokingIds.has(grant.id)}
+                    moving={movingIds.has(grant.id)}
                     onRevoke={() => handleRevoke(grant.id)}
+                    onMove={(newScope) => handleMove(grant.id, newScope)}
                   />
                 ))}
               </div>

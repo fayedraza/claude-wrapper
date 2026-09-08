@@ -15,8 +15,10 @@ from .models import SettingAction
 from .router import SettingsPathError, compute_file_path
 
 # Story 1.4: grants.py persists permission grants under this same key in
-# this same file (settings.local.json) -- see `_preserve_permission_grants`.
+# either settings.local.json (local scope) or settings.json (team scope) --
+# see `_preserve_permission_grants`.
 _PERMISSION_GRANTS_KEY = "permissionGrants"
+_GRANT_HOSTING_CATEGORIES = ("settings.local.json", "settings.json")
 
 
 def resolve_display_path(claude_dir: Path, file_path: str) -> Path:
@@ -67,14 +69,16 @@ def _verify_path_matches_category(claude_dir: Path, action: SettingAction, resol
 
 def _preserve_permission_grants(existing_path: Path, new_content: str) -> str:
     """Re-inject an existing `permissionGrants` entry into an approved
-    `settings.local.json` write, so it survives an unrelated change.
+    `settings.local.json`/`settings.json` write, so it survives an
+    unrelated change.
 
     `grants.py` (Story 1.4) persists permission grants under this same key
-    in this same file, entirely independently of the Settings Router's
-    propose/apply flow -- without this, approving any other
-    `settings.local.json` change here (e.g. a permission/tool tweak) would
-    silently clobber the whole file via `write_text`, destroying every grant
-    with no error or warning.
+    in either of these two files (local or team scope), entirely
+    independently of the Settings Router's propose/apply flow -- without
+    this, approving any other change to either file here (e.g. a
+    permission/tool tweak) would silently clobber the whole file via
+    `write_text`, destroying every grant living in it with no error or
+    warning.
 
     Only fires when the *existing* on-disk file already has a
     `permissionGrants` key. Returns `new_content` unchanged when: there's no
@@ -123,7 +127,7 @@ def apply_action(claude_dir: Path, action: SettingAction) -> Path:
     # create / update
     target.parent.mkdir(parents=True, exist_ok=True)
     content = action.content
-    if action.target_category == "settings.local.json":
+    if action.target_category in _GRANT_HOSTING_CATEGORIES:
         content = _preserve_permission_grants(target, content)
     target.write_text(content, encoding="utf-8")
     return target

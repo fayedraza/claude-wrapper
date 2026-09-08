@@ -204,17 +204,17 @@ def test_no_permission_grants_key_yields_no_grant_rows(claude_dir: Path) -> None
 
     result = get_current_configuration(claude_dir)
 
-    assert not any(item.kind == "mcp" for item in result.items)
+    assert not any(item.kind in ("mcp", "file") for item in result.items)
 
 
-def test_no_settings_local_json_at_all_yields_no_grant_rows(claude_dir: Path) -> None:
+def test_no_settings_files_at_all_yields_no_grant_rows(claude_dir: Path) -> None:
     result = get_current_configuration(claude_dir)
-    assert not any(item.kind == "mcp" for item in result.items)
+    assert not any(item.kind in ("mcp", "file") for item in result.items)
 
 
-def test_permission_grants_present_are_rendered_as_mcp_rows(claude_dir: Path) -> None:
+def test_local_scoped_grant_is_rendered_with_settings_local_json_path(claude_dir: Path) -> None:
     (claude_dir / "settings.local.json").write_text(
-        json.dumps({"permissionGrants": [{"text": "filesystem: read/write access to src/"}]}),
+        json.dumps({"permissionGrants": [{"id": "g1", "kind": "mcp", "target": "filesystem-mcp"}]}),
         encoding="utf-8",
     )
 
@@ -222,7 +222,7 @@ def test_permission_grants_present_are_rendered_as_mcp_rows(claude_dir: Path) ->
 
     grant_items = [item for item in result.items if item.kind == "mcp"]
     assert len(grant_items) == 1
-    assert grant_items[0].text == "filesystem: read/write access to src/"
+    assert grant_items[0].text == "filesystem-mcp"
     assert grant_items[0].path == ".claude/settings.local.json"
 
 
@@ -231,26 +231,31 @@ def test_permission_grants_empty_list_yields_no_rows(claude_dir: Path) -> None:
 
     result = get_current_configuration(claude_dir)
 
-    assert not any(item.kind == "mcp" for item in result.items)
+    assert not any(item.kind in ("mcp", "file") for item in result.items)
 
 
-def test_permission_grants_in_settings_json_are_never_rendered(claude_dir: Path) -> None:
-    """A `permissionGrants` entry hand-edited directly into `settings.json`
-    (Claude Code's own reserved, team-shared file) is invisible here -- not
-    merely unmanaged by the Permission Manager, but never displayed either,
-    so this reader and `grants.py`'s `list_grants()` can never disagree
-    about what's configured."""
+def test_team_scoped_grant_is_rendered_with_settings_json_path(claude_dir: Path) -> None:
+    """A `permissionGrants` entry in `settings.json` (team scope) is a real,
+    first-class source of grants -- not just settings.local.json -- and is
+    rendered with the settings.json path, distinguishing it from a local
+    grant (the "banner")."""
     (claude_dir / "settings.json").write_text(
-        json.dumps({"permissionGrants": [{"text": "hand-edited team grant"}]}), encoding="utf-8"
+        json.dumps({"permissionGrants": [{"id": "t1", "kind": "file", "target": "team-file.txt"}]}),
+        encoding="utf-8",
     )
     (claude_dir / "settings.local.json").write_text(
-        json.dumps({"permissionGrants": [{"text": "local grant"}]}), encoding="utf-8"
+        json.dumps({"permissionGrants": [{"id": "l1", "kind": "file", "target": "local-file.txt"}]}),
+        encoding="utf-8",
     )
 
     result = get_current_configuration(claude_dir)
 
-    grant_texts = {item.text for item in result.items if item.kind == "mcp"}
-    assert grant_texts == {"local grant"}
+    grant_items = [item for item in result.items if item.kind == "file"]
+    by_path = {item.path: item.text for item in grant_items}
+    assert by_path == {
+        ".claude/settings.json": "team-file.txt",
+        ".claude/settings.local.json": "local-file.txt",
+    }
 
 
 def test_multiple_permission_grant_entries_are_all_rendered(claude_dir: Path) -> None:
@@ -258,8 +263,8 @@ def test_multiple_permission_grant_entries_are_all_rendered(claude_dir: Path) ->
         json.dumps(
             {
                 "permissionGrants": [
-                    {"text": "filesystem: read/write access to src/"},
-                    {"text": "network: outbound HTTPS only"},
+                    {"id": "g1", "kind": "file", "target": "src/config.json"},
+                    {"id": "g2", "kind": "mcp", "target": "network-server"},
                 ]
             }
         ),
@@ -268,11 +273,8 @@ def test_multiple_permission_grant_entries_are_all_rendered(claude_dir: Path) ->
 
     result = get_current_configuration(claude_dir)
 
-    grant_items = [item for item in result.items if item.kind == "mcp"]
-    assert [item.text for item in grant_items] == [
-        "filesystem: read/write access to src/",
-        "network: outbound HTTPS only",
-    ]
+    grant_items = [item for item in result.items if item.kind in ("file", "mcp")]
+    assert {item.text for item in grant_items} == {"src/config.json", "network-server"}
     assert all(item.path == ".claude/settings.local.json" for item in grant_items)
 
 
@@ -281,7 +283,7 @@ def test_malformed_settings_local_json_is_ignored_not_a_crash(claude_dir: Path) 
 
     result = get_current_configuration(claude_dir)
 
-    assert not any(item.kind == "mcp" for item in result.items)
+    assert not any(item.kind in ("mcp", "file") for item in result.items)
 
 
 @pytest.mark.skipif(os.name == "nt", reason="chmod-based permission denial isn't meaningful on Windows")
@@ -307,18 +309,18 @@ def test_get_current_configuration_propagates_real_directory_permission_error(cl
         os.chmod(rules_dir, original_mode)
 
 
-def test_permission_grant_entry_without_known_fields_falls_back_to_generic_text(claude_dir: Path) -> None:
-    """Never invent a permission-grant schema (Boundaries) -- an entry with no
-    recognizable text/description/name still renders a row, not an error."""
+def test_permission_grant_entry_missing_required_fields_is_silently_skipped_not_a_crash(claude_dir: Path) -> None:
+    """This reader delegates entirely to `grants.list_grants()`'s strict
+    schema (`{id, kind, target}`) -- an entry that doesn't fit it (e.g. a
+    pre-schema freeform shape) is silently skipped rather than crashing or
+    inventing placeholder text for it."""
     (claude_dir / "settings.local.json").write_text(
         json.dumps({"permissionGrants": [{"unknownField": "x"}]}), encoding="utf-8"
     )
 
     result = get_current_configuration(claude_dir)
 
-    grant_items = [item for item in result.items if item.kind == "mcp"]
-    assert len(grant_items) == 1
-    assert grant_items[0].text == "Permission grant"
+    assert not any(item.kind in ("mcp", "file") for item in result.items)
 
 
 # ---- combined -----------------------------------------------------------
@@ -330,7 +332,7 @@ def test_rules_and_agents_and_grants_together(claude_dir: Path) -> None:
     (claude_dir / "agents").mkdir()
     (claude_dir / "agents" / "worker.md").write_text("Does work.", encoding="utf-8")
     (claude_dir / "settings.local.json").write_text(
-        json.dumps({"permissionGrants": [{"text": "grant one"}]}), encoding="utf-8"
+        json.dumps({"permissionGrants": [{"id": "g1", "kind": "mcp", "target": "grant one"}]}), encoding="utf-8"
     )
 
     result = get_current_configuration(claude_dir)
@@ -391,7 +393,9 @@ def test_endpoint_returns_full_mixed_response_through_the_http_json_boundary(
         "---\nname: auth_worker\ndescription: handles OAuth2 flows\n---\n", encoding="utf-8"
     )
     (claude_dir / "settings.local.json").write_text(
-        json.dumps({"permissionGrants": [{"text": "filesystem: read/write access to src/"}]}),
+        json.dumps(
+            {"permissionGrants": [{"id": "g1", "kind": "mcp", "target": "filesystem: read/write access to src/"}]}
+        ),
         encoding="utf-8",
     )
 
