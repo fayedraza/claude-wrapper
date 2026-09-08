@@ -1,10 +1,12 @@
 """Unit tests for `brain.settings_router.apply` (FR-2 approval-gated write)."""
 
+import json
 from pathlib import Path
 
 import pytest
 
 from brain.settings_router.apply import apply_action, resolve_display_path
+from brain.settings_router.grants import add_grant, list_grants
 from brain.settings_router.models import SettingAction
 from brain.settings_router.router import SettingsPathError
 
@@ -144,6 +146,68 @@ def test_apply_action_rejects_settings_json_category_pointed_at_settings_local_j
         apply_action(claude_dir, action)
 
     assert list(claude_dir.iterdir()) == []
+
+
+def test_apply_action_preserves_permission_grants_on_unrelated_settings_local_json_change(claude_dir: Path) -> None:
+    """Regression: grants.py (Story 1.4) persists `permissionGrants` in this
+    same settings.local.json file, entirely independently of the Settings
+    Router's propose/apply flow -- approving an unrelated change to that
+    file (e.g. a permission/tool tweak) must not silently destroy it."""
+    grant = add_grant(claude_dir, "file", "src/secrets.json")
+
+    action = SettingAction(
+        target_category="settings.local.json",
+        file_path=".claude/settings.local.json",
+        content=json.dumps({"someUnrelatedSetting": True}),
+        action="update",
+    )
+    apply_action(claude_dir, action)
+
+    remaining = list_grants(claude_dir).grants
+    assert remaining == [grant]
+    # The unrelated change was still applied.
+    data = json.loads((claude_dir / "settings.local.json").read_text(encoding="utf-8"))
+    assert data["someUnrelatedSetting"] is True
+
+
+def test_apply_action_does_not_override_an_explicit_permission_grants_write(claude_dir: Path) -> None:
+    """An approved settings.local.json change that explicitly defines
+    `permissionGrants` itself is an intentional change to grants -- the old
+    on-disk value must not be re-injected over it."""
+    add_grant(claude_dir, "file", "src/old.json")
+
+    new_grants = [{"id": "manual-1", "kind": "mcp", "target": "manual-server"}]
+    action = SettingAction(
+        target_category="settings.local.json",
+        file_path=".claude/settings.local.json",
+        content=json.dumps({"permissionGrants": new_grants}),
+        action="update",
+    )
+    apply_action(claude_dir, action)
+
+    data = json.loads((claude_dir / "settings.local.json").read_text(encoding="utf-8"))
+    assert data["permissionGrants"] == new_grants
+
+
+def test_apply_action_preserves_permission_grants_on_unrelated_settings_json_change(claude_dir: Path) -> None:
+    """Same regression as the settings.local.json case above, now for team
+    scope: grants.py can persist `permissionGrants` in settings.json too
+    (Story 1.4 follow-up), so approving an unrelated change to *that* file
+    (e.g. a hooks/rule tweak) must not silently destroy team grants either."""
+    grant = add_grant(claude_dir, "file", "src/secrets.json", scope="team")
+
+    action = SettingAction(
+        target_category="settings.json",
+        file_path=".claude/settings.json",
+        content=json.dumps({"hooks": {"PreToolUse": []}}),
+        action="update",
+    )
+    apply_action(claude_dir, action)
+
+    remaining = list_grants(claude_dir).grants
+    assert remaining == [grant]
+    data = json.loads((claude_dir / "settings.json").read_text(encoding="utf-8"))
+    assert data["hooks"] == {"PreToolUse": []}
 
 
 def test_apply_action_raises_os_error_on_filesystem_failure(claude_dir: Path) -> None:

@@ -35,6 +35,10 @@ htmlcov/
 # BMad Claude Code runtime state
 .claude/scheduled_tasks.lock
 
+# Story 1.4: personal permission grants -- a personal trust decision, never
+# team-shared (Boundaries: reads/writes never touch .claude/settings.json).
+.claude/settings.local.json
+
 # Playwright
 /test-results/
 /playwright-report/

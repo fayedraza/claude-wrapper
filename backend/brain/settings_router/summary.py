@@ -3,31 +3,30 @@
 `get_current_configuration()` is the only entry point. It never writes
 anything and never caches -- every call walks `.claude/rules/*.md` and
 `.claude/agents/*.md` fresh (same "no cached snapshot" rule as
-`router.classify_request`), and checks `settings.json`/`settings.local.json`
-for a `permissionGrants` key (Boundaries: namespaced deliberately distinct
-from Claude Code's own reserved `permissions` key).
+`router.classify_request`), and delegates permission-grant listing to
+`grants.list_grants()` -- see `_permission_grant_items` for why this is a
+delegation rather than its own file-reading logic.
 
 A genuine directory-level failure (e.g. permission denied listing `rules/`
 or `agents/`) is deliberately left unguarded here (see `_list_markdown_files`)
 so it propagates up to the gateway's global `@app.exception_handler(OSError)`
 -- the same mechanism `/api/settings/apply` relies on -- rather than being
 silently reported as "nothing configured" (I/O matrix: "Fetch fails --
-Error envelope surfaced").
+Error envelope surfaced"). `grants.list_grants()` has the same propagation
+behavior for its own two files, so this holds for permission grants too.
 """
 
 from __future__ import annotations
 
-import json
 import re
 from pathlib import Path
 from typing import Any
 
 import yaml
 
+from .grants import list_grants
 from .models import ConfigSummaryItem, CurrentConfiguration
 from .router import display_path
-
-_SETTINGS_FILENAMES = ("settings.json", "settings.local.json")
 
 # `---\n...\n---` YAML frontmatter block at the very start of a file, matching
 # this repo's own SKILL.md convention (Design Notes).
@@ -137,54 +136,30 @@ def _split_frontmatter(text: str) -> tuple[dict[str, Any] | None, str]:
     return None, body
 
 
-# ---- permission grants (Story 1.4 owns the real schema) ---------------------
+# ---- permission grants -------------------------------------------------
+
+
+_GRANT_SCOPE_FILENAMES: dict[str, str] = {"local": "settings.local.json", "team": "settings.json"}
 
 
 def _permission_grant_items(claude_dir: Path) -> list[ConfigSummaryItem]:
-    """Show a row per entry under `permissionGrants` in `settings.json`/
-    `settings.local.json`, only when that key is present.
+    """Show a row per grant, across both `settings.local.json` (personal)
+    and `settings.json` (team).
 
-    Boundaries/Never: this deliberately does not invent a permission-grant
-    schema -- it only checks for the key's presence (absent today, so this
-    always returns `[]` in practice) and, when present, renders whatever
-    generic text it can find on each entry. Story 1.4 owns the real schema;
-    once it writes real data under this same key, this should pick it up
-    automatically without needing to change.
+    Delegates entirely to `grants.list_grants()` -- the single canonical
+    reader for permission-grant data -- rather than re-parsing the JSON
+    itself. This is deliberate: an earlier version of this function had its
+    own separate file-reading logic that could (and once did) disagree with
+    `grants.py`'s own view of what's configured. Sharing one function means
+    the "Currently configured" summary and the Permission Manager's own
+    list can never show different data again.
     """
     items: list[ConfigSummaryItem] = []
-    for filename in _SETTINGS_FILENAMES:
-        settings_path = claude_dir / filename
-        if not settings_path.is_file():
-            continue
-
-        text = _read_text(settings_path)
-        if text is None:
-            continue
-        try:
-            data = json.loads(text)
-        except json.JSONDecodeError:
-            continue
-        if not isinstance(data, dict) or "permissionGrants" not in data:
-            continue
-
-        grants = data["permissionGrants"]
-        if not isinstance(grants, list):
-            continue
-
-        path_display = display_path(claude_dir, settings_path)
-        for grant in grants:
-            items.append(ConfigSummaryItem(kind="mcp", text=_grant_text(grant), path=path_display))
+    for grant in list_grants(claude_dir).grants:
+        filename = _GRANT_SCOPE_FILENAMES[grant.scope]
+        path_display = display_path(claude_dir, claude_dir / filename)
+        items.append(ConfigSummaryItem(kind=grant.kind, text=grant.target, path=path_display))
     return items
-
-
-def _grant_text(grant: Any) -> str:
-    if isinstance(grant, dict):
-        candidate = grant.get("text") or grant.get("description") or grant.get("name")
-        if candidate:
-            return str(candidate)
-    elif isinstance(grant, str) and grant:
-        return grant
-    return "Permission grant"
 
 
 # ---- shared helpers -----------------------------------------------------

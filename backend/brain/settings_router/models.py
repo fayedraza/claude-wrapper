@@ -63,7 +63,8 @@ class SettingsRouterOutput(BaseModel):
 # mock (key-settings.html's `.config-kind.*`) -- deliberately distinct,
 # informal, and unrelated to `TargetCategory` above. Never conflate the two
 # or render `target_category` in a "Currently configured" row.
-ConfigKind = Literal["rule", "agent", "mcp"]
+# Story 1.4 adds "file" -- a real permission-grant row can now be either kind.
+ConfigKind = Literal["rule", "agent", "mcp", "file"]
 
 
 class ConfigSummaryItem(BaseModel):
@@ -78,3 +79,65 @@ class CurrentConfiguration(BaseModel):
     """Top-level response for `GET /api/settings/current`."""
 
     items: list[ConfigSummaryItem] = Field(default_factory=list)
+
+
+# Story 1.4 (FR-6): flat per-resource permission grants -- one row per
+# resource (a file path or an MCP server name), never per-action rules.
+PermissionGrantKind = Literal["file", "mcp"]
+
+# Which settings file a grant lives in -- deliberately a separate, informal
+# vocabulary from TargetCategory's "team_instructions"/"local_instructions"
+# (same reasoning as ConfigKind above: distinct concepts, never conflated).
+# "local" = .claude/settings.local.json (personal, not committed); "team" =
+# .claude/settings.json (shared, committed -- the same file Claude Code's
+# own `hooks`/`permissions` keys live in, though this app never touches
+# those keys, only `permissionGrants`).
+GrantScope = Literal["local", "team"]
+
+
+class PermissionGrant(BaseModel):
+    """One persisted grant: `{id, kind, target}`, tagged with which file it
+    lives in (`scope`) -- `scope` is derived from which file it was read
+    from, never itself persisted inside the JSON entry."""
+
+    id: str = Field(description="Server-generated identifier, stable across reads/writes.")
+    kind: PermissionGrantKind
+    target: str = Field(
+        description=(
+            "Opaque identifier -- a file path or an MCP server name. Never "
+            "validated for existence/reachability (Design Notes), only for "
+            "non-empty-after-trim and a generous max length."
+        )
+    )
+    scope: GrantScope = Field(
+        description=(
+            "Which settings file this grant lives in -- 'local' "
+            "(.claude/settings.local.json, personal) or 'team' "
+            "(.claude/settings.json, shared)."
+        )
+    )
+
+
+class PermissionGrantsList(BaseModel):
+    """Top-level response for `GET /api/permission-grants`."""
+
+    grants: list[PermissionGrant] = Field(default_factory=list)
+
+
+class AddPermissionGrantRequest(BaseModel):
+    """Request body for `POST /api/permission-grants`."""
+
+    kind: PermissionGrantKind
+    target: str
+    scope: GrantScope = "local"
+
+
+class UpdatePermissionGrantRequest(BaseModel):
+    """Request body for `PATCH /api/permission-grants/{id}`. All fields
+    optional -- only the provided ones change; omitted ones keep their
+    current value. Setting `scope` to the other value moves the grant
+    between `settings.local.json` and `settings.json`."""
+
+    kind: PermissionGrantKind | None = None
+    target: str | None = None
+    scope: GrantScope | None = None

@@ -7,12 +7,16 @@ interface ConfigSummaryItemProps {
 }
 
 // Mirrors mockups/key-settings.html's `.config-kind.*` chip colors -- a
-// distinct, informal kind vocabulary (rule/agent/mcp) from ProposedChangeCard's
-// target_category chip, per spec Boundaries: never conflate the two.
-const KIND_CHIP_STYLES: Record<ConfigSummaryItemData["kind"], string> = {
+// distinct, informal kind vocabulary (rule/agent/mcp/file) from
+// ProposedChangeCard's target_category chip, per spec Boundaries: never
+// conflate the two. Story 1.4 adds "file" (no mockup exists for it -- a
+// distinct violet, reused identically by PermissionGrantRow, whose
+// kind vocabulary (file/mcp) is a subset of this one).
+export const KIND_CHIP_STYLES: Record<ConfigSummaryItemData["kind"], string> = {
   rule: "bg-[rgba(45,156,219,.14)] text-[#1D6FA0] dark:bg-[rgba(90,184,245,.18)] dark:text-[#5AB8F5]",
   agent: "bg-[rgba(39,174,96,.14)] text-[#1F7A45] dark:bg-[rgba(74,222,128,.18)] dark:text-[#4ADE80]",
   mcp: "bg-[rgba(155,155,170,.20)] text-[#5C5C6E] dark:bg-[rgba(176,168,201,.20)] dark:text-[#B0A8C9]",
+  file: "bg-[rgba(155,89,182,.16)] text-[#7D3C98] dark:bg-[rgba(199,146,234,.20)] dark:text-[#C792EA]",
 };
 
 /**
