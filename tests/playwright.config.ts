@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { defineConfig, devices } from '@playwright/test';
+import { E2E_CLAUDE_DIR } from './support/e2e-claude-dir';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -54,6 +55,9 @@ export default defineConfig({
       url: `${API_URL}/health`,
       reuseExistingServer: !process.env.CI,
       timeout: 60_000,
+      // Isolates the E2E-run backend from this repo's own real .claude/ --
+      // see e2e-claude-dir.ts for why this is required, not optional.
+      env: { CLAUDE_WRAPPER_CLAUDE_DIR: E2E_CLAUDE_DIR },
     },
   ],
 });
