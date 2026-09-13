@@ -134,3 +134,31 @@ Findings surfaced incidentally during review that are pre-existing or out of sco
 - source_spec: `_bmad-output/implementation-artifacts/spec-2-1-decompose-task-into-agents.md`
   summary: Neither the new `decomposeTask()` fetch nor any existing frontend API call (`settings-api.ts`, `permission-grants-api.ts`) has a request timeout or `AbortController` — a hung backend call leaves the UI stuck in its loading state indefinitely, with no cancellation if the user navigates away or resubmits.
   evidence: Surfaced by the blind-hunter review against this story's new `page.tsx` submit flow, but confirmed the same gap already exists in Epic 1's Settings/Permission Manager fetch calls — a cross-cutting gap, not unique to Meta-Planner.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-2-view-agent-context-graph.md`
+  summary: Story 2.2's context graph renders as plain cards/tags instead of a real drawn node/edge graph (no connecting lines) — a deliberate, human-approved stopgap, not an oversight.
+  evidence: `EXPERIENCE.md` names `@xyflow/react` (React Flow) as the stack pin for graph rendering, but it isn't installed anywhere in `frontend/package.json`, and no UX mock exists for this specific planning-time, source-labeled context-graph screen (confirmed: `mockups/key-dag-canvas.html`/`key-node-inspector.html` both cover live-execution screens only, zero matches for "source"/"topic"/"subtopic" in either file). The human chose the card-list UI for v1 rather than adding the dependency and inventing untested visual treatment. The backend `Node` model (source, neighbors, etc.) is unaffected either way — swapping in a real drawn graph later is a frontend-only change once a UX mock exists.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-1-decompose-task-into-agents.md`
+  summary: `decompose_task`'s pre-existing agent-level `node_id_map[agent.node_id] = slug` construction (Story 2.1) silently overwrites an earlier mapping if two agents share the exact same raw (pre-sanitization) `node_id` string — the same class of bug fixed at the node level in Story 2.2.
+  evidence: Surfaced incidentally by Story 2.2's review while fixing the analogous bug in `_resolve_agent_nodes`. Never exercised by any Story 2.1 test (only near-duplicate raw ids like `"Worker!!!"` vs `"worker"` are tested, never two agents with the identical raw string). Low probability in practice (the system prompt asks for descriptive per-agent ids), but the fix is the same one-line guard already applied at the node level — worth mirroring here.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-2-view-agent-context-graph.md`
+  summary: No frontend test exists for the new click-to-expand context-graph UI (`ProposedAgentList`'s toggle, `AgentContextGraph`'s source labels/neighbor tags) — extends the existing, already-logged repo-wide "no frontend test framework" gap (Stories 1.2, 2.1).
+  evidence: Confirmed by the verification-gap review: no `*.test.*`/`*.spec.*` file anywhere under `frontend/`, no test runner in `package.json`, and the one e2e spec that loads the real home page (`tests/e2e/home-page.spec.ts`) never submits an intent or reaches the `ProposedAgentList` render path.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-2-view-agent-context-graph.md`
+  summary: `MAX_TOKENS` (8000) wasn't re-tuned even though every agent's structured output now also carries a `nodes` list with 9 fields per node (4 of which are always-null padding for Engine-owned fields) — truncation now surfaces as a full 502 (`parsed_output is None`) rather than a degraded result.
+  evidence: Surfaced by the blind-hunter review. No real API call was made this session to measure actual token usage against the larger schema; worth revisiting with real usage data once this ships.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-2-view-agent-context-graph.md`
+  summary: `Node.telemetry`/`live_stream` are bare untyped `dict | None` in the schema sent to the LLM (an open/unconstrained object type) purely so the Engine can use them later — a cleaner split (an LLM-facing planning-time Node shape vs. a fuller Node type layered with engine fields post-parse) would avoid shipping an unconstrained field to a structured-output schema.
+  evidence: Surfaced by the blind-hunter review. Deliberately deferred per the spec's own Design Notes: "the pinned `TelemetryEvent`/status-enum contracts are introduced by the Engine stories that actually write them" — revisit once those contracts exist.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-2-view-agent-context-graph.md`
+  summary: `source_ref`'s "must be a real path shown in the project snapshot, never invented" rule is prompt-only and unenforced server-side beyond non-emptiness — nothing checks a `codebase_file` node's `source_ref` against the actual set of paths read into context.
+  evidence: Surfaced by the blind-hunter/edge-case-hunter reviews. Verifying this would require `decompose_task` to thread the read file-path set (or the raw snapshot) into a post-parse validation step; deferred since this is read-only preview data with no execution/security consequence if wrong (unlike Settings Router's `file_path`, which gates an actual write).
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-2-view-agent-context-graph.md`
+  summary: `frontend/components/task-list/ProposedAgentList.tsx` renders `agent.node_id` in `font-mono` — a UX-DR2 violation ("agent/node names are plain system font, never monospace") pre-existing from Story 2.1, not introduced by Story 2.2.
+  evidence: Surfaced incidentally by the blind-hunter review while reading this file's diff context (the span itself is unchanged by Story 2.2, only reindented). UX-DR2's exact wording lives in `_bmad-output/planning-artifacts/epics.md`'s UX-DR Coverage Map; DESIGN.md restates the rule without the label.

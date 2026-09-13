@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from brain.meta_planner.models import DagBlueprint
+from brain.meta_planner.models import DagBlueprint, Node
 
 
 class _FakeParsedResponse:
@@ -52,6 +52,26 @@ def claude_dir(tmp_path: Path) -> Path:
     d = tmp_path / ".claude"
     d.mkdir()
     return d
+
+
+@pytest.fixture
+def make_node():
+    """Factory fixture: `make_node(node_id=..., **overrides)` -> `Node`, so
+    Story 2.2 tests don't repeat every required field (`topic`, `source`)
+    for the parts of a node that don't matter to a given test."""
+
+    def _make(node_id: str = "some_topic", **overrides) -> Node:
+        defaults: dict = {
+            "node_id": node_id,
+            "topic": overrides.pop("topic", node_id.replace("_", " ").title()),
+            "source": "claude_context",
+            "source_ref": None,
+            "neighbors": [],
+        }
+        defaults.update(overrides)
+        return Node(**defaults)
+
+    return _make
 
 
 @pytest.fixture

@@ -9,11 +9,32 @@
 
 import { readErrorMessage } from "@/lib/settings-api";
 
+/** A subtopic node in an agent's context graph (Story 2.2). Execution/
+ * telemetry fields (`status`, `telemetry`, `live_stream`, `checkpoint_ref`)
+ * are pre-provisioned per AD-2 but always null from the Meta-Planner --
+ * the Engine is the sole writer of those, once a run actually executes.
+ *
+ * Named `ContextGraphNode` (not `Node`) to avoid shadowing the DOM's global
+ * `Node` type -- this does not rename the Python `Node` Pydantic model,
+ * which has no such collision. */
+export interface ContextGraphNode {
+  node_id: string;
+  topic: string;
+  source: "mcp" | "local_docs" | "codebase_file" | "claude_context";
+  source_ref: string | null;
+  neighbors: string[];
+  status: string | null;
+  telemetry: Record<string, unknown> | null;
+  live_stream: Record<string, unknown> | null;
+  checkpoint_ref: string | null;
+}
+
 export interface AgentSpec {
   node_id: string;
   parent_id: string | null;
   responsibility: string;
   depends_on: string[];
+  nodes: ContextGraphNode[];
 }
 
 export interface DagBlueprint {
