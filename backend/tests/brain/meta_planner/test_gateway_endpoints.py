@@ -7,7 +7,7 @@ import pytest
 from anthropic import APIConnectionError
 from fastapi.testclient import TestClient
 
-from brain.meta_planner.models import AgentSpec, DagBlueprint
+from brain.meta_planner.models import AgentSpec, DagBlueprint, Node
 from gateway.main import app, get_anthropic_client, get_claude_dir
 
 
@@ -177,6 +177,131 @@ def test_decompose_returns_502_when_multiple_agents_have_null_parent_id(api_clie
 
     assert response.status_code == 502
     assert response.json()["error_code"] == "meta_planner.llm_error"
+
+
+def test_decompose_response_includes_context_graph_nodes(api_client: TestClient, claude_dir: Path, mock_anthropic) -> None:
+    """I/O matrix row 1 (existing codebase), API level: the response includes
+    each agent's nodes, with a codebase_file node's source_ref intact."""
+    (claude_dir.parent / "app.py").write_text("print('hi')", encoding="utf-8")
+    mock_anthropic(
+        output=DagBlueprint(
+            intent="add OAuth2 login",
+            agents=[
+                AgentSpec(
+                    node_id="main_orchestrator",
+                    parent_id=None,
+                    responsibility="Coordinate auth rollout",
+                    depends_on=[],
+                    nodes=[Node(node_id="app_entrypoint", topic="App entrypoint", source="codebase_file", source_ref="app.py")],
+                ),
+            ],
+        )
+    )
+
+    response = api_client.post("/api/meta-planner/decompose", json={"intent": "add OAuth2 login"})
+
+    assert response.status_code == 200
+    nodes = response.json()["agents"][0]["nodes"]
+    assert len(nodes) == 1
+    assert nodes[0]["source"] == "codebase_file"
+    assert nodes[0]["source_ref"] == "app.py"
+    # Execution fields are pre-provisioned but unset from the Meta-Planner.
+    assert nodes[0]["status"] is None
+
+
+def test_decompose_drops_dangling_neighbor_reference_end_to_end(api_client: TestClient, mock_anthropic) -> None:
+    """I/O matrix row 3, API level: a dangling neighbor reference never
+    reaches the response."""
+    mock_anthropic(
+        output=DagBlueprint(
+            intent="x",
+            agents=[
+                AgentSpec(
+                    node_id="main_orchestrator",
+                    parent_id=None,
+                    responsibility="root",
+                    depends_on=[],
+                    nodes=[
+                        Node(
+                            node_id="auth_docs",
+                            topic="Auth docs",
+                            source="claude_context",
+                            neighbors=["nonexistent_node"],
+                        )
+                    ],
+                ),
+            ],
+        )
+    )
+
+    response = api_client.post("/api/meta-planner/decompose", json={"intent": "x"})
+
+    assert response.status_code == 200
+    assert response.json()["agents"][0]["nodes"][0]["neighbors"] == []
+
+
+def test_decompose_dedupes_duplicate_node_ids_within_one_agent_end_to_end(
+    api_client: TestClient, mock_anthropic
+) -> None:
+    """I/O matrix row 4, API level: duplicate node_id hints on the same
+    agent are deduped and neighbor references remapped."""
+    mock_anthropic(
+        output=DagBlueprint(
+            intent="x",
+            agents=[
+                AgentSpec(
+                    node_id="main_orchestrator",
+                    parent_id=None,
+                    responsibility="root",
+                    depends_on=[],
+                    nodes=[
+                        Node(node_id="Auth Docs!!!", topic="Auth docs", source="claude_context"),
+                        Node(
+                            node_id="auth_docs",
+                            topic="Auth docs 2",
+                            source="claude_context",
+                            neighbors=["Auth Docs!!!"],
+                        ),
+                    ],
+                ),
+            ],
+        )
+    )
+
+    response = api_client.post("/api/meta-planner/decompose", json={"intent": "x"})
+
+    assert response.status_code == 200
+    nodes = response.json()["agents"][0]["nodes"]
+    node_ids = [n["node_id"] for n in nodes]
+    assert node_ids == ["auth-docs", "auth-docs-2"]
+    assert nodes[1]["neighbors"] == ["auth-docs"]
+
+
+def test_decompose_new_empty_codebase_has_no_codebase_file_node_end_to_end(
+    api_client: TestClient, mock_anthropic
+) -> None:
+    """I/O matrix row 2, API level: new/empty codebase -- no node cites
+    source=codebase_file."""
+    mock_anthropic(
+        output=DagBlueprint(
+            intent="scaffold a new service",
+            agents=[
+                AgentSpec(
+                    node_id="main_orchestrator",
+                    parent_id=None,
+                    responsibility="Coordinate scaffolding",
+                    depends_on=[],
+                    nodes=[Node(node_id="conventions", topic="Conventions", source="claude_context")],
+                ),
+            ],
+        )
+    )
+
+    response = api_client.post("/api/meta-planner/decompose", json={"intent": "scaffold a new service"})
+
+    assert response.status_code == 200
+    nodes = response.json()["agents"][0]["nodes"]
+    assert all(n["source"] != "codebase_file" for n in nodes)
 
 
 def test_decompose_dedupes_duplicate_slugs_end_to_end(api_client: TestClient, mock_anthropic) -> None:

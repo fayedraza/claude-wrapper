@@ -21,7 +21,7 @@ import anthropic
 
 from brain.settings_router.router import sanitize_slug
 
-from .models import AgentSpec, DagBlueprint
+from .models import AgentSpec, DagBlueprint, Node
 
 MODEL = "claude-opus-5"
 MAX_TOKENS = 8000
@@ -79,6 +79,32 @@ Rules:
   existing code or conventions.
 - This is a preview only. Do not propose executing anything, writing files,
   or any action beyond planning the agents themselves.
+
+For every agent (including the main orchestrator), also propose its context
+graph: a `nodes` list of subtopic nodes the agent will draw from to do its
+work.
+- Each node has a `topic` (short, plain-language subtopic), a `source`, and
+  optionally a `source_ref`.
+- `source` must be exactly one of:
+  - "codebase_file" -- a real file shown in the project root snapshot. Only
+    use this source if the snapshot actually shows source files; set
+    `source_ref` to the real relative path shown in the snapshot. Never
+    invent a path, and never use "codebase_file" for a new/empty codebase.
+  - "local_docs" -- project documentation/config the agent would read.
+  - "claude_context" -- context already available to the agent from its own
+    instructions/conversation, with no separate file.
+  - "mcp" -- a hypothetical MCP tool/resource this agent would use. No real
+    MCP registry exists yet, so this is always a proposal, not a real
+    connection.
+- Give each node a short, descriptive node_id (like agent node_ids, this is
+  only a naming hint, not a guaranteed-unique identifier) -- it only needs
+  to be unique within this one agent's own nodes list, not across agents.
+- `neighbors` lists node_ids of topically-related nodes on the *same* agent.
+  Every neighbor entry must be a node_id you also emitted as a node for that
+  same agent -- never a dangling reference, never another agent's node_id.
+- Give every agent at least one node when the project/intent gives you
+  anything to name; an agent with genuinely nothing to draw from can have an
+  empty nodes list.
 """
 
 
@@ -147,10 +173,66 @@ def _dedupe_slug(base_slug: str, seen: set[str]) -> str:
     return candidate
 
 
+def _resolve_agent_nodes(nodes: list[Node]) -> list[Node]:
+    """Sanitize/dedup/remap one agent's `nodes` list in its own per-agent
+    namespace (Design Notes: a node_id only needs to be unique within its
+    own agent's nodes, never globally) -- mirrors the agent-level
+    node_id/parent_id/depends_on pass above, applied to Node.node_id/
+    neighbors instead. Unlike agent parent_id, a dangling neighbor entry
+    has no "manufactures a second root" failure mode, so it's always
+    dropped silently (Boundaries), never an error.
+    """
+    # Pass 1: sanitize + dedup every node_id in this agent's own namespace.
+    # Keyed by the LLM's raw (untrusted) node_id string; if two nodes share
+    # the exact same raw node_id, only the first occurrence's mapping is
+    # kept -- otherwise the second would silently overwrite it and a
+    # neighbor reference to that shared raw id would resolve to the wrong
+    # (second) node, leaving the first unreachable by reference.
+    node_id_map: dict[str, str] = {}
+    seen_slugs: set[str] = set()
+    resolved_nodes: list[Node] = []
+    for node in nodes:
+        slug = _dedupe_slug(sanitize_slug(node.node_id), seen_slugs)
+        seen_slugs.add(slug)
+        if node.node_id not in node_id_map:
+            node_id_map[node.node_id] = slug
+        resolved_nodes.append(node.model_copy(update={"node_id": slug}))
+
+    # Pass 2: remap neighbors to the resolved slugs, dropping any entry that
+    # doesn't resolve to a node_id in this same agent's nodes list, dropping
+    # a self-reference (a node is never topically related to itself), and
+    # deduplicating while preserving order. Also force the Engine-owned
+    # execution/telemetry fields back to None regardless of what the LLM
+    # returned -- never trust the LLM for Engine-owned fields (AD-2/AD-8),
+    # mirroring the Settings Router's treatment of `file_path`.
+    final_nodes: list[Node] = []
+    for node in resolved_nodes:
+        remapped_neighbors = [
+            node_id_map[n] for n in node.neighbors if n in node_id_map and node_id_map[n] != node.node_id
+        ]
+        remapped_neighbors = list(dict.fromkeys(remapped_neighbors))
+        final_nodes.append(
+            node.model_copy(
+                update={
+                    "neighbors": remapped_neighbors,
+                    "status": None,
+                    "telemetry": None,
+                    "live_stream": None,
+                    "checkpoint_ref": None,
+                }
+            )
+        )
+    return final_nodes
+
+
 def decompose_task(intent: str, project_root: Path, client: anthropic.Anthropic) -> DagBlueprint:
     """Decompose a developer intent into a `DagBlueprint`. Read-only,
     preview-only: no `.claude/` write, no checkpoint store, nothing executes
     (Boundaries).
+
+    Also sanitizes/dedupes/remaps each agent's own `nodes`/`neighbors` in
+    that agent's per-agent namespace (`_resolve_agent_nodes`), not just the
+    agent-level `node_id`/`parent_id`/`depends_on` handled below.
 
     Raises `MetaPlannerValidationError` on a blank/whitespace intent (no LLM
     call made) and `MetaPlannerLLMError` on any LLM failure or empty parsed
@@ -216,7 +298,16 @@ def decompose_task(intent: str, project_root: Path, client: anthropic.Anthropic)
                 "match any node_id in the same response"
             )
         remapped_depends_on = [node_id_map[dep] for dep in agent.depends_on if dep in node_id_map]
-        final_agents.append(agent.model_copy(update={"parent_id": remapped_parent, "depends_on": remapped_depends_on}))
+        resolved_nodes = _resolve_agent_nodes(agent.nodes)
+        final_agents.append(
+            agent.model_copy(
+                update={
+                    "parent_id": remapped_parent,
+                    "depends_on": remapped_depends_on,
+                    "nodes": resolved_nodes,
+                }
+            )
+        )
 
     # AC #1 / Boundaries: exactly one agent has parent_id=null. Zero (every
     # parent_id was non-null, or the response was empty) or more than one
