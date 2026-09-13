@@ -11,7 +11,10 @@ half of FR-5): `GET/POST /api/permission-grants`,
 `PATCH /api/permission-grants/{id}`, and `DELETE /api/permission-grants/{id}`
 -- reading/writing both `.claude/settings.local.json` (personal) and
 `.claude/settings.json` (team), tagging each grant with which one it lives
-in. WebSocket/SSE handlers and Redis-mirror reads (AD-9) are built in later
+in. Story 2.1 adds the Meta-Planner surface: `POST /api/meta-planner/decompose`
+asks Claude to decompose a submitted intent into a `DagBlueprint` (main
+orchestrator + subagents) -- read-only preview, nothing written or executed.
+WebSocket/SSE handlers and Redis-mirror reads (AD-9) are built in later
 stories -- see
 `_bmad-output/planning-artifacts/architecture/architecture-claude-wrapper-2026-08-30/ARCHITECTURE-SPINE.md`.
 """
@@ -25,6 +28,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
+from brain.meta_planner.decompose import (
+    MetaPlannerLLMError,
+    MetaPlannerValidationError,
+    decompose_task,
+)
+from brain.meta_planner.models import DagBlueprint
 from brain.settings_router.apply import apply_action
 from brain.settings_router.grants import (
     PermissionGrantNotFoundError,
@@ -88,6 +97,10 @@ class ProposeRequest(BaseModel):
     request: str
 
 
+class DecomposeRequest(BaseModel):
+    intent: str
+
+
 @app.exception_handler(SettingsPathError)
 async def handle_settings_path_error(request: Request, exc: SettingsPathError) -> JSONResponse:
     return JSONResponse(
@@ -128,6 +141,28 @@ async def handle_permission_grant_validation_error(request: Request, exc: Permis
     )
 
 
+@app.exception_handler(MetaPlannerValidationError)
+async def handle_meta_planner_validation_error(request: Request, exc: MetaPlannerValidationError) -> JSONResponse:
+    # I/O matrix: blank/whitespace intent -- 400, no LLM call.
+    return JSONResponse(
+        status_code=400,
+        content=ErrorEnvelope(error_code="meta_planner.invalid_intent", message=str(exc)).model_dump(),
+    )
+
+
+@app.exception_handler(MetaPlannerLLMError)
+async def handle_meta_planner_llm_error(request: Request, exc: MetaPlannerLLMError) -> JSONResponse:
+    # I/O matrix: LLM fails / unparseable (API error, timeout, no creds, or
+    # parsed_output is None) -- 502. MetaPlannerLLMError subclasses
+    # anthropic.AnthropicError, but Starlette's handler lookup walks the
+    # exception's MRO and matches this more specific handler first, so this
+    # takes precedence over handle_anthropic_error below.
+    return JSONResponse(
+        status_code=502,
+        content=ErrorEnvelope(error_code="meta_planner.llm_error", message=str(exc)).model_dump(),
+    )
+
+
 @app.exception_handler(PermissionGrantNotFoundError)
 async def handle_permission_grant_not_found_error(request: Request, exc: PermissionGrantNotFoundError) -> JSONResponse:
     # I/O matrix: "Revoke unknown/already-revoked id -- Error shown, list re-fetches", 404 envelope.
@@ -155,6 +190,23 @@ def propose_settings(
     explicit approval.
     """
     return classify_request(payload.request, claude_dir, client)
+
+
+@app.post("/api/meta-planner/decompose", response_model=DagBlueprint)
+def decompose(
+    payload: DecomposeRequest,
+    claude_dir: Path = Depends(get_claude_dir),
+    client: anthropic.Anthropic = Depends(get_anthropic_client),
+) -> DagBlueprint:
+    """Story 2.1: decompose a submitted intent into a `DagBlueprint` preview
+    (main orchestrator + subagents).
+
+    Read-only: no `.claude/` write, no checkpoint store, nothing executes.
+    The project root is `claude_dir`'s parent -- the same repo root
+    `get_claude_dir()` resolves relative to.
+    """
+    project_root = claude_dir.parent
+    return decompose_task(payload.intent, project_root, client)
 
 
 @app.get("/api/settings/current", response_model=CurrentConfiguration)
