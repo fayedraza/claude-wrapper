@@ -192,7 +192,15 @@ def test_decompose_response_includes_context_graph_nodes(api_client: TestClient,
                     parent_id=None,
                     responsibility="Coordinate auth rollout",
                     depends_on=[],
-                    nodes=[Node(node_id="app_entrypoint", topic="App entrypoint", source="codebase_file", source_ref="app.py")],
+                    nodes=[
+                        Node(
+                            node_id="app_entrypoint",
+                            topic="App entrypoint",
+                            source="codebase_file",
+                            source_ref="app.py",
+                            required=False,
+                        )
+                    ],
                 ),
             ],
         )
@@ -227,6 +235,7 @@ def test_decompose_drops_dangling_neighbor_reference_end_to_end(api_client: Test
                             topic="Auth docs",
                             source="claude_context",
                             neighbors=["nonexistent_node"],
+                            required=False,
                         )
                     ],
                 ),
@@ -255,12 +264,13 @@ def test_decompose_dedupes_duplicate_node_ids_within_one_agent_end_to_end(
                     responsibility="root",
                     depends_on=[],
                     nodes=[
-                        Node(node_id="Auth Docs!!!", topic="Auth docs", source="claude_context"),
+                        Node(node_id="Auth Docs!!!", topic="Auth docs", source="claude_context", required=False),
                         Node(
                             node_id="auth_docs",
                             topic="Auth docs 2",
                             source="claude_context",
                             neighbors=["Auth Docs!!!"],
+                            required=False,
                         ),
                     ],
                 ),
@@ -291,7 +301,7 @@ def test_decompose_new_empty_codebase_has_no_codebase_file_node_end_to_end(
                     parent_id=None,
                     responsibility="Coordinate scaffolding",
                     depends_on=[],
-                    nodes=[Node(node_id="conventions", topic="Conventions", source="claude_context")],
+                    nodes=[Node(node_id="conventions", topic="Conventions", source="claude_context", required=False)],
                 ),
             ],
         )
@@ -302,6 +312,55 @@ def test_decompose_new_empty_codebase_has_no_codebase_file_node_end_to_end(
     assert response.status_code == 200
     nodes = response.json()["agents"][0]["nodes"]
     assert all(n["source"] != "codebase_file" for n in nodes)
+
+
+def test_decompose_response_includes_flight_path_and_aggregate_estimates(
+    api_client: TestClient, mock_anthropic
+) -> None:
+    """Story 2.3, API level: each agent's flight_path/estimated_* and the
+    top-level aggregate_estimated_* are present and consistent (AC #2/#3)."""
+    mock_anthropic(
+        output=DagBlueprint(
+            intent="x",
+            agents=[
+                AgentSpec(
+                    node_id="main_orchestrator",
+                    parent_id=None,
+                    responsibility="root",
+                    depends_on=[],
+                    nodes=[
+                        Node(node_id="required_a", topic="Required A", source="claude_context", required=True),
+                        Node(node_id="optional_a", topic="Optional A", source="claude_context", required=False),
+                    ],
+                ),
+                AgentSpec(
+                    node_id="worker",
+                    parent_id="main_orchestrator",
+                    responsibility="x",
+                    depends_on=[],
+                    nodes=[Node(node_id="required_b", topic="Required B", source="claude_context", required=True)],
+                ),
+            ],
+        )
+    )
+
+    response = api_client.post("/api/meta-planner/decompose", json={"intent": "x"})
+
+    assert response.status_code == 200
+    body = response.json()
+    orchestrator = next(a for a in body["agents"] if a["node_id"] == "main-orchestrator")
+    worker = next(a for a in body["agents"] if a["node_id"] == "worker")
+
+    assert orchestrator["flight_path"] == ["required-a"]
+    assert worker["flight_path"] == ["required-b"]
+    assert body["aggregate_estimated_tokens"] == orchestrator["estimated_tokens"] + worker["estimated_tokens"]
+    assert (
+        body["aggregate_estimated_duration_seconds"]
+        == orchestrator["estimated_duration_seconds"] + worker["estimated_duration_seconds"]
+    )
+    assert (
+        body["aggregate_estimated_cost_usd"] == orchestrator["estimated_cost_usd"] + worker["estimated_cost_usd"]
+    )
 
 
 def test_decompose_dedupes_duplicate_slugs_end_to_end(api_client: TestClient, mock_anthropic) -> None:

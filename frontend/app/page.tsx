@@ -118,7 +118,12 @@ export default function Home() {
             <p className="mb-space-2 text-label font-bold uppercase tracking-wide text-text2 dark:text-text2-dark">
               Proposed agents
             </p>
-            <ProposedAgentList agents={decomposeState.blueprint.agents} />
+            <ProposedAgentList
+              agents={decomposeState.blueprint.agents}
+              aggregateEstimatedTokens={decomposeState.blueprint.aggregate_estimated_tokens}
+              aggregateEstimatedDurationSeconds={decomposeState.blueprint.aggregate_estimated_duration_seconds}
+              aggregateEstimatedCostUsd={decomposeState.blueprint.aggregate_estimated_cost_usd}
+            />
           </div>
         )}
 

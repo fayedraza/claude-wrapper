@@ -31,11 +31,14 @@ class Node(BaseModel):
     """One subtopic node in an agent's context graph (Story 2.2).
 
     Context-graph fields (`topic`, `source`, `source_ref`, `neighbors`) are
-    populated by the Meta-Planner at planning time. Execution/telemetry
-    fields are pre-provisioned but left unset (`None`) here -- the Engine is
-    the sole writer of `status` and the rest, once a run actually executes
-    (AD-2/AD-8). This is the same `Node` entity, not a separate
-    context-only type.
+    populated by the Meta-Planner at planning time. `required` (Story 2.3)
+    is the semantic judgment call of whether the agent actually needs this
+    node -- it has no default, so the LLM must always explicitly set it
+    rather than silently omitting it and having that read as an implicit
+    `false`. Execution/telemetry fields are pre-provisioned but left unset
+    (`None`) here -- the Engine is the sole writer of `status` and the rest,
+    once a run actually executes (AD-2/AD-8). This is the same `Node`
+    entity, not a separate context-only type.
     """
 
     node_id: str = Field(
@@ -69,6 +72,15 @@ class Node(BaseModel):
             "node_ids of topically-related nodes on this same agent. Every "
             "entry must be a node_id present elsewhere in this same "
             "agent's nodes list -- never a dangling reference."
+        ),
+    )
+    required: bool = Field(
+        description=(
+            "Whether this agent actually needs this node to do its work "
+            "(true) or the node is merely supplementary/nice-to-have "
+            "(false). This is a semantic judgment call left to you -- "
+            "unlike the computed flight-path/cost fields on AgentSpec, this "
+            "value is used as-is, never overwritten server-side."
         ),
     )
 
@@ -130,6 +142,41 @@ class AgentSpec(BaseModel):
             "nodes list where the project has any subtopics to name."
         ),
     )
+    flight_path: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Server-computed (Story 2.3): ordered node_ids of this agent's "
+            "required nodes only. Exists in this schema so the LLM's own "
+            "value round-trips harmlessly, but `decompose_task` always "
+            "overwrites it with `flight_path.select_flight_path`'s result "
+            "-- never trust the LLM for this field."
+        ),
+    )
+    estimated_tokens: int = Field(
+        default=0,
+        description=(
+            "Server-computed (Story 2.3): total token-cost estimate across "
+            "this agent's flight path. Always overwritten by "
+            "`select_flight_path` -- never trust the LLM for this field."
+        ),
+    )
+    estimated_duration_seconds: float = Field(
+        default=0.0,
+        description=(
+            "Server-computed (Story 2.3): total duration estimate for this "
+            "agent's flight path. Always overwritten by "
+            "`select_flight_path` -- never trust the LLM for this field."
+        ),
+    )
+    estimated_cost_usd: float = Field(
+        default=0.0,
+        description=(
+            "Server-computed (Story 2.3): dollar-cost estimate for "
+            "estimated_tokens, at a placeholder fixed rate (Design Notes -- "
+            "no per-agent model is pinned yet). Always overwritten by "
+            "`select_flight_path` -- never trust the LLM for this field."
+        ),
+    )
 
 
 class DagBlueprint(BaseModel):
@@ -137,3 +184,27 @@ class DagBlueprint(BaseModel):
 
     intent: str = Field(description="The original developer intent this blueprint decomposes.")
     agents: list[AgentSpec] = Field(default_factory=list)
+    aggregate_estimated_tokens: int = Field(
+        default=0,
+        description=(
+            "Server-computed (Story 2.3): sum of every agent's own "
+            "estimated_tokens. Always overwritten by `decompose_task` -- "
+            "never trust the LLM for this field."
+        ),
+    )
+    aggregate_estimated_duration_seconds: float = Field(
+        default=0.0,
+        description=(
+            "Server-computed (Story 2.3): sum of every agent's own "
+            "estimated_duration_seconds. Always overwritten by "
+            "`decompose_task` -- never trust the LLM for this field."
+        ),
+    )
+    aggregate_estimated_cost_usd: float = Field(
+        default=0.0,
+        description=(
+            "Server-computed (Story 2.3): sum of every agent's own "
+            "estimated_cost_usd. Always overwritten by `decompose_task` -- "
+            "never trust the LLM for this field."
+        ),
+    )
