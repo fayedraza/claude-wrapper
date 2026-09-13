@@ -7,6 +7,28 @@ import AgentContextGraph from "./AgentContextGraph";
 
 interface ProposedAgentListProps {
   agents: AgentSpec[];
+  /** Story 2.3, `DagBlueprint.aggregate_estimated_tokens` -- sum of every
+   * agent's own `estimated_tokens`, rendered once above the list. */
+  aggregateEstimatedTokens: number;
+  /** Story 2.3, `DagBlueprint.aggregate_estimated_duration_seconds`. */
+  aggregateEstimatedDurationSeconds: number;
+}
+
+/** Whole seconds/minutes, e.g. "3s" or "2m 5s" -- no fractional seconds
+ * (Story 2.3's `estimated_duration_seconds` is a float estimate, not a
+ * precise measurement, so sub-second precision would be misleading). */
+function formatDuration(seconds: number): string {
+  const rounded = Math.round(seconds);
+  const minutes = Math.floor(rounded / 60);
+  const remainingSeconds = rounded % 60;
+  if (minutes === 0) return `${remainingSeconds}s`;
+  return `${minutes}m ${remainingSeconds}s`;
+}
+
+/** e.g. "12,000 tokens" -- grouped for readability, since these are
+ * potentially large aggregate sums. */
+function formatTokens(tokens: number): string {
+  return `${tokens.toLocaleString()} token${tokens === 1 ? "" : "s"}`;
 }
 
 /**
@@ -20,8 +42,18 @@ interface ProposedAgentListProps {
  * Story 2.2: clicking a card toggles an inline expansion showing that
  * agent's context graph (`AgentContextGraph`) -- no new route/drawer, no
  * drawn graph lines (no UX mock exists for this screen yet).
+ *
+ * Story 2.3: each agent's server-computed token/duration estimate renders
+ * as a line on its (collapsed) card -- visible without expanding, per AC #2
+ * -- and one aggregate total renders above the whole list (AC #3). Both are
+ * read directly off `AgentSpec`/`DagBlueprint`'s server-computed fields,
+ * never recomputed client-side.
  */
-export default function ProposedAgentList({ agents }: ProposedAgentListProps) {
+export default function ProposedAgentList({
+  agents,
+  aggregateEstimatedTokens,
+  aggregateEstimatedDurationSeconds,
+}: ProposedAgentListProps) {
   const [expandedNodeId, setExpandedNodeId] = useState<string | null>(null);
 
   // A freshly submitted decompose result may reuse a node_id from the
@@ -42,6 +74,16 @@ export default function ProposedAgentList({ agents }: ProposedAgentListProps) {
 
   return (
     <div className="flex flex-col gap-space-3">
+      <p className="text-small text-text2 dark:text-text2-dark">
+        Aggregate estimate:{" "}
+        <span className="font-bold text-text1 dark:text-text1-dark">
+          {formatTokens(aggregateEstimatedTokens ?? 0)}
+        </span>
+        {" · "}
+        <span className="font-bold text-text1 dark:text-text1-dark">
+          {formatDuration(aggregateEstimatedDurationSeconds ?? 0)}
+        </span>
+      </p>
       {agents.map((agent) => {
         const expanded = expandedNodeId === agent.node_id;
         const panelId = `agent-context-graph-${agent.node_id}`;
@@ -72,13 +114,17 @@ export default function ProposedAgentList({ agents }: ProposedAgentListProps) {
             <p className="mt-space-1 text-small leading-relaxed text-text1 dark:text-text1-dark">
               {agent.responsibility}
             </p>
+            <p className="mt-space-1 text-label text-text2 dark:text-text2-dark">
+              {formatTokens(agent.estimated_tokens ?? 0)} ·{" "}
+              {formatDuration(agent.estimated_duration_seconds ?? 0)}
+            </p>
             {expanded && (
               <div
                 id={panelId}
                 className="mt-space-3 border-t border-black/10 pt-space-3 dark:border-white/10"
                 onClick={(event) => event.stopPropagation()}
               >
-                <AgentContextGraph nodes={agent.nodes} />
+                <AgentContextGraph nodes={agent.nodes} flightPath={agent.flight_path} />
               </div>
             )}
           </div>

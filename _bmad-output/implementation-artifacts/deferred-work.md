@@ -162,3 +162,15 @@ Findings surfaced incidentally during review that are pre-existing or out of sco
 - source_spec: `_bmad-output/implementation-artifacts/spec-2-2-view-agent-context-graph.md`
   summary: `frontend/components/task-list/ProposedAgentList.tsx` renders `agent.node_id` in `font-mono` — a UX-DR2 violation ("agent/node names are plain system font, never monospace") pre-existing from Story 2.1, not introduced by Story 2.2.
   evidence: Surfaced incidentally by the blind-hunter review while reading this file's diff context (the span itself is unchanged by Story 2.2, only reindented). UX-DR2's exact wording lives in `_bmad-output/planning-artifacts/epics.md`'s UX-DR Coverage Map; DESIGN.md restates the rule without the label.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-3-flight-path-cost-estimate.md`
+  summary: `DagBlueprint.aggregate_estimated_duration_seconds` is a flat sum of every agent's own duration estimate, which overstates real wall-clock time for any agents that could run in parallel (they're only linked by declared `parent_id`/`depends_on` edges, not forced to run sequentially).
+  evidence: Surfaced by the blind-hunter review. No execution/concurrency model exists yet (nothing runs — Epic 3 owns real dispatch/parallelism), so a critical-path-aware duration estimate can't be built correctly until that model is decided; a flat sum is the only thing computable today and matches FR-10's own acknowledged "known source of estimate error" framing.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-3-flight-path-cost-estimate.md`
+  summary: `_node_token_cost` reads a required `codebase_file` node's full content via `errors="replace"` even if the file is binary, counting replacement characters as if they were real text content instead of falling back to the flat constant.
+  evidence: Surfaced by the blind-hunter review. Low practical impact (replacement chars are still roughly 1:1 with the file's real byte count, so the resulting estimate isn't wildly off) and low probability (an LLM-declared `codebase_file` node is expected to name real source files, which are text) — worth a proper binary-sniff guard if this ever proves to matter with real usage.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-3-flight-path-cost-estimate.md`
+  summary: `formatDuration` in `ProposedAgentList.tsx` has no hours component, so a large aggregate estimate across many agents would render as an awkward value like "182m 3s" instead of "3h 2m 3s".
+  evidence: Surfaced by the blind-hunter review. Low probability for typical single-task use; worth revisiting if real usage shows aggregate durations regularly exceeding ~60 minutes.

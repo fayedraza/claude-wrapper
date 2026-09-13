@@ -67,6 +67,7 @@ def make_node():
             "source": "claude_context",
             "source_ref": None,
             "neighbors": [],
+            "required": False,
         }
         defaults.update(overrides)
         return Node(**defaults)

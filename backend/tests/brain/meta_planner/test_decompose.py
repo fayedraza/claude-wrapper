@@ -428,7 +428,7 @@ def test_node_model_execution_fields_default_to_none() -> None:
     """AD-2/AD-8: execution/telemetry fields are pre-provisioned but always
     unset from the Meta-Planner -- the Engine writes them once a run
     executes."""
-    node = Node(node_id="x", topic="X", source="claude_context")
+    node = Node(node_id="x", topic="X", source="claude_context", required=False)
     assert node.status is None
     assert node.telemetry is None
     assert node.live_stream is None
@@ -442,10 +442,10 @@ def test_node_codebase_file_source_requires_non_empty_source_ref() -> None:
     `source='codebase_file'` -- a codebase_file node with no real path to
     cite is an invalid response, not a silently-accepted null."""
     with pytest.raises(ValidationError):
-        Node(node_id="x", topic="X", source="codebase_file")
+        Node(node_id="x", topic="X", source="codebase_file", required=False)
 
     with pytest.raises(ValidationError):
-        Node(node_id="x", topic="X", source="codebase_file", source_ref="   ")
+        Node(node_id="x", topic="X", source="codebase_file", source_ref="   ", required=False)
 
 
 # ---- node_id/neighbors edge cases (post-review hardening) ------------------
@@ -574,6 +574,90 @@ def test_decompose_task_forces_engine_owned_node_fields_to_none(
     assert node.telemetry is None
     assert node.live_stream is None
     assert node.checkpoint_ref is None
+
+
+# ---- flight path / cost estimate (Story 2.3) -------------------------------
+
+
+def test_decompose_task_computes_flight_path_and_aggregate_estimates(
+    project_root: Path, make_fake_client, make_node
+) -> None:
+    """End-to-end: each agent's flight_path/estimated_* are server-computed
+    from its own required nodes, and the top-level aggregate is the sum of
+    every agent's own estimate (AC #3)."""
+    fake_output = DagBlueprint(
+        intent="x",
+        agents=[
+            AgentSpec(
+                node_id="main_orchestrator",
+                parent_id=None,
+                responsibility="root",
+                depends_on=[],
+                nodes=[
+                    make_node("required_a", required=True),
+                    make_node("optional_a", required=False),
+                ],
+            ),
+            AgentSpec(
+                node_id="worker",
+                parent_id="main_orchestrator",
+                responsibility="x",
+                depends_on=[],
+                nodes=[make_node("required_b", required=True)],
+            ),
+        ],
+    )
+    client = make_fake_client(output=fake_output)
+
+    result = decompose_task("x", project_root, client)
+
+    orchestrator = next(a for a in result.agents if a.node_id == "main-orchestrator")
+    worker = next(a for a in result.agents if a.node_id == "worker")
+
+    assert orchestrator.flight_path == ["required-a"]
+    assert worker.flight_path == ["required-b"]
+    assert orchestrator.estimated_tokens > 0
+    assert worker.estimated_tokens > 0
+    assert result.aggregate_estimated_tokens == orchestrator.estimated_tokens + worker.estimated_tokens
+    assert (
+        result.aggregate_estimated_duration_seconds
+        == orchestrator.estimated_duration_seconds + worker.estimated_duration_seconds
+    )
+
+
+def test_decompose_task_ignores_llm_proposed_computed_fields(
+    project_root: Path, make_fake_client, make_node
+) -> None:
+    """Even if the LLM sets flight_path/estimated_*/aggregate_estimated_* to
+    some hallucinated value, decompose_task always recomputes them
+    server-side (Boundaries: same "hint, always overwritten" treatment as
+    node_id)."""
+    fake_output = DagBlueprint(
+        intent="x",
+        agents=[
+            AgentSpec(
+                node_id="main_orchestrator",
+                parent_id=None,
+                responsibility="root",
+                depends_on=[],
+                nodes=[make_node("optional_only", required=False)],
+                flight_path=["optional_only"],
+                estimated_tokens=999999,
+                estimated_duration_seconds=999999.0,
+            ),
+        ],
+        aggregate_estimated_tokens=123456,
+        aggregate_estimated_duration_seconds=123456.0,
+    )
+    client = make_fake_client(output=fake_output)
+
+    result = decompose_task("x", project_root, client)
+
+    assert result.agents[0].flight_path == []
+    assert result.agents[0].estimated_tokens == 0
+    assert result.agents[0].estimated_duration_seconds == 0.0
+    assert result.aggregate_estimated_tokens == 0
+    assert result.aggregate_estimated_duration_seconds == 0.0
 
 
 def test_decompose_task_existing_codebase_multi_agent_every_agent_has_nodes(

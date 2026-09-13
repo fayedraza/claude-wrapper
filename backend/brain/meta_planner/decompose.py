@@ -10,6 +10,14 @@ then sanitizes and dedup-checks every `node_id` server-side (reusing
 `sanitize_slug`) and remaps every `parent_id`/`depends_on` reference to the
 resolved slugs before returning. The LLM's own slug is never trusted for
 uniqueness (Boundaries).
+
+Story 2.3 adds a pure-Python flight-path/cost pass (`flight_path.py`, no
+second LLM call, AD-7) run per agent right after its nodes are resolved: it
+selects the agent's `required=true` nodes as its `flight_path` and computes
+`estimated_tokens`/`estimated_duration_seconds`, then this module sums those
+into the top-level `aggregate_estimated_*` fields. Both are always
+server-computed, never trusted from the LLM even though the fields exist in
+the same `output_format` schema.
 """
 
 from __future__ import annotations
@@ -21,6 +29,7 @@ import anthropic
 
 from brain.settings_router.router import sanitize_slug
 
+from .flight_path import select_flight_path
 from .models import AgentSpec, DagBlueprint, Node
 
 MODEL = "claude-opus-5"
@@ -105,6 +114,15 @@ work.
 - Give every agent at least one node when the project/intent gives you
   anything to name; an agent with genuinely nothing to draw from can have an
   empty nodes list.
+- For every node, also set `required`: true if the agent actually needs that
+  node to do its work, false if the node is merely supplementary/nice-to-have
+  context. This is a judgment call -- weigh it honestly per node rather than
+  marking everything required.
+- Ignore `flight_path`, `estimated_tokens`, `estimated_duration_seconds` (on
+  each agent) and `aggregate_estimated_tokens`/
+  `aggregate_estimated_duration_seconds` (top-level) -- they exist in this
+  schema, but whatever you put there is discarded and recomputed
+  server-side. Leave them at their defaults.
 """
 
 
@@ -299,15 +317,19 @@ def decompose_task(intent: str, project_root: Path, client: anthropic.Anthropic)
             )
         remapped_depends_on = [node_id_map[dep] for dep in agent.depends_on if dep in node_id_map]
         resolved_nodes = _resolve_agent_nodes(agent.nodes)
-        final_agents.append(
-            agent.model_copy(
-                update={
-                    "parent_id": remapped_parent,
-                    "depends_on": remapped_depends_on,
-                    "nodes": resolved_nodes,
-                }
-            )
+        resolved_agent = agent.model_copy(
+            update={
+                "parent_id": remapped_parent,
+                "depends_on": remapped_depends_on,
+                "nodes": resolved_nodes,
+            }
         )
+        # Story 2.3: flight_path/estimated_tokens/estimated_duration_seconds
+        # are always server-computed from this agent's now-resolved nodes,
+        # never trusted from the LLM (Boundaries) -- computed here, after
+        # node_id sanitization/remapping, so the path is ordered over the
+        # final, deduped neighbor references, not the LLM's raw ones.
+        final_agents.append(select_flight_path(resolved_agent, project_root))
 
     # AC #1 / Boundaries: exactly one agent has parent_id=null. Zero (every
     # parent_id was non-null, or the response was empty) or more than one
@@ -320,4 +342,15 @@ def decompose_task(intent: str, project_root: Path, client: anthropic.Anthropic)
             f"Claude returned {root_count} agents with parent_id=null; exactly one is required"
         )
 
-    return parsed.model_copy(update={"agents": final_agents})
+    # Story 2.3: the aggregate is always the sum of every agent's own
+    # (already server-computed) estimate -- never an independent LLM value.
+    aggregate_tokens = sum(agent.estimated_tokens for agent in final_agents)
+    aggregate_duration = sum(agent.estimated_duration_seconds for agent in final_agents)
+
+    return parsed.model_copy(
+        update={
+            "agents": final_agents,
+            "aggregate_estimated_tokens": aggregate_tokens,
+            "aggregate_estimated_duration_seconds": aggregate_duration,
+        }
+    )

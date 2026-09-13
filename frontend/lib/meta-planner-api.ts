@@ -23,6 +23,10 @@ export interface ContextGraphNode {
   source: "mcp" | "local_docs" | "codebase_file" | "claude_context";
   source_ref: string | null;
   neighbors: string[];
+  /** LLM-proposed (Story 2.3): whether this agent actually needs this node
+   * (vs. merely supplementary). Used as-is -- unlike `flight_path` below,
+   * never overwritten server-side. */
+  required: boolean;
   status: string | null;
   telemetry: Record<string, unknown> | null;
   live_stream: Record<string, unknown> | null;
@@ -35,11 +39,24 @@ export interface AgentSpec {
   responsibility: string;
   depends_on: string[];
   nodes: ContextGraphNode[];
+  /** Story 2.3, always server-computed: ordered node_ids of this agent's
+   * `required` nodes only. */
+  flight_path: string[];
+  /** Story 2.3, always server-computed: total token-cost estimate across
+   * `flight_path`. */
+  estimated_tokens: number;
+  /** Story 2.3, always server-computed: total duration estimate (seconds)
+   * across `flight_path`. */
+  estimated_duration_seconds: number;
 }
 
 export interface DagBlueprint {
   intent: string;
   agents: AgentSpec[];
+  /** Story 2.3, always server-computed: sum of every agent's own `estimated_tokens`. */
+  aggregate_estimated_tokens: number;
+  /** Story 2.3, always server-computed: sum of every agent's own `estimated_duration_seconds`. */
+  aggregate_estimated_duration_seconds: number;
 }
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
