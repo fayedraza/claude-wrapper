@@ -25,7 +25,14 @@ dev = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
-addopts = "-ra"
+# --import-mode=importlib: test packages under tests/ deliberately have no
+# __init__.py (see tests/brain/settings_router/conftest.py), so pytest's
+# default "prepend" import mode collides once two sibling directories each
+# have a same-named module (e.g. two test_gateway_endpoints.py files, one
+# per feature package under tests/brain/) -- importlib mode keys modules by
+# full path instead of bare basename, so this is never a problem regardless
+# of how many feature packages reuse the same test file names.
+addopts = "-ra --import-mode=importlib"
 markers = [
     "integration: needs a real dependency (e.g. Redis via docker compose), not just pure unit logic",
 ]
