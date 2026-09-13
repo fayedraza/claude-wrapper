@@ -22,6 +22,11 @@ export interface PermissionGrant {
   kind: PermissionGrantKind;
   target: string;
   scope: GrantScope;
+  // Display-only: for a "file" grant, whether that path exists on disk right
+  // now. Always null/undefined for "mcp" (reachability isn't a filesystem
+  // check). Never affects add/update -- targets are never validated for
+  // existence at write time, this is only a UI hint.
+  exists?: boolean | null;
 }
 
 export interface PermissionGrantsList {

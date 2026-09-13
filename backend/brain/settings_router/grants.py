@@ -100,8 +100,40 @@ def _parse_grants(data: dict[str, Any], scope: GrantScope) -> list[PermissionGra
 
 def _dump_grants(grants: list[PermissionGrant]) -> list[dict[str, Any]]:
     """Serialize back to the on-disk shape -- `scope` is derived from which
-    file a grant lives in, never itself persisted inside the entry."""
-    return [g.model_dump(exclude={"scope"}) for g in grants]
+    file a grant lives in and `exists` is a display-only, freshly-computed
+    hint (see `_with_existence`); neither is ever persisted inside the
+    entry."""
+    return [g.model_dump(exclude={"scope", "exists"}) for g in grants]
+
+
+def _resolve_target_path(claude_dir: Path, target: str) -> Path:
+    """Resolve a `file`-kind grant's target the way a user would expect to
+    type it: relative to the project root (`claude_dir.parent`, the same
+    root `.claude/` itself lives under). An already-absolute target is used
+    as-is."""
+    path = Path(target)
+    return path if path.is_absolute() else claude_dir.parent / path
+
+
+def _file_exists(claude_dir: Path, target: str) -> bool:
+    """Best-effort, display-only existence check for a `file` grant's
+    target. This is purely a UI hint (Design Notes: targets are never
+    validated for existence at write time) -- an `OSError` while checking
+    (e.g. a permission-denied parent directory) is treated as "can't tell,
+    don't warn" rather than surfacing a false "doesn't exist" hint.
+    """
+    try:
+        return _resolve_target_path(claude_dir, target).exists()
+    except OSError:
+        return True
+
+
+def _with_existence(claude_dir: Path, grant: PermissionGrant) -> PermissionGrant:
+    """Attach the display-only `exists` flag for a `file` grant (left `None`
+    for `mcp` -- reachability isn't a filesystem check)."""
+    if grant.kind != "file":
+        return grant
+    return grant.model_copy(update={"exists": _file_exists(claude_dir, grant.target)})
 
 
 def _find_grant(claude_dir: Path, grant_id: str) -> tuple[PermissionGrant, GrantScope] | tuple[None, None]:
@@ -124,7 +156,7 @@ def list_grants(claude_dir: Path) -> PermissionGrantsList:
     grants: list[PermissionGrant] = []
     for scope in _SCOPES:
         grants.extend(_parse_grants(_read_settings(_settings_path(claude_dir, scope)), scope))
-    return PermissionGrantsList(grants=grants)
+    return PermissionGrantsList(grants=[_with_existence(claude_dir, g) for g in grants])
 
 
 def add_grant(claude_dir: Path, kind: PermissionGrantKind, target: str, scope: GrantScope = "local") -> PermissionGrant:
@@ -152,13 +184,13 @@ def add_grant(claude_dir: Path, kind: PermissionGrantKind, target: str, scope: G
 
     for existing in grants:
         if existing.kind == kind and existing.target == trimmed:
-            return existing
+            return _with_existence(claude_dir, existing)
 
     new_grant = PermissionGrant(id=uuid.uuid4().hex, kind=kind, target=trimmed, scope=scope)
     grants.append(new_grant)
     data[_GRANTS_KEY] = _dump_grants(grants)
     _write_settings(path, data)
-    return new_grant
+    return _with_existence(claude_dir, new_grant)
 
 
 def revoke_grant(claude_dir: Path, grant_id: str) -> None:
@@ -226,13 +258,13 @@ def update_grant(
             if existing.kind == new_kind and existing.target == new_target:
                 data[_GRANTS_KEY] = _dump_grants(grants)
                 _write_settings(path, data)
-                return existing
+                return _with_existence(claude_dir, existing)
 
         updated = PermissionGrant(id=grant_id, kind=new_kind, target=new_target, scope=new_scope)
         grants.append(updated)
         data[_GRANTS_KEY] = _dump_grants(grants)
         _write_settings(path, data)
-        return updated
+        return _with_existence(claude_dir, updated)
 
     # Moving between scopes: remove from the old file, insert into the new one.
     old_path = _settings_path(claude_dir, current_scope)
@@ -247,10 +279,10 @@ def update_grant(
 
     for existing in new_grants:
         if existing.kind == new_kind and existing.target == new_target:
-            return existing
+            return _with_existence(claude_dir, existing)
 
     updated = PermissionGrant(id=grant_id, kind=new_kind, target=new_target, scope=new_scope)
     new_grants.append(updated)
     new_data[_GRANTS_KEY] = _dump_grants(new_grants)
     _write_settings(new_path, new_data)
-    return updated
+    return _with_existence(claude_dir, updated)

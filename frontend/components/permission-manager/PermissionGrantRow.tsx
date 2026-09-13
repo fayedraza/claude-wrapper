@@ -56,11 +56,13 @@ export default function PermissionGrantRow({ grant, revoking, moving, onRevoke, 
       >
         {SCOPE_LABELS[grant.scope]}
       </span>
-      <span
-        title={grant.target}
-        className="min-w-0 flex-1 truncate font-mono text-small text-text1 dark:text-text1-dark"
-      >
-        {grant.target}
+      <span title={grant.target} className="min-w-0 flex-1">
+        <span className="block truncate font-mono text-small text-text1 dark:text-text1-dark">{grant.target}</span>
+        {grant.kind === "file" && grant.exists === false && (
+          <span className="block text-label text-status-trouble dark:text-status-trouble-dark">
+            This file doesn&apos;t exist in the project.
+          </span>
+        )}
       </span>
       <button
         type="button"
