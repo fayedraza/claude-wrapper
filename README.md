@@ -10,6 +10,21 @@ UX design specs that govern this build.
 - Python 3.12+ and [`uv`](https://docs.astral.sh/uv/) (for `backend/`)
 - Docker + Docker Compose (for local Redis)
 
+## Quick start
+
+`scripts/dev.sh` starts Redis (best-effort), the backend, and the frontend
+together, checking `ANTHROPIC_API_KEY` up front so a missing key fails fast
+with a clear message instead of a 502 from the Settings feature:
+
+```bash
+scripts/dev.sh            # start everything
+scripts/dev.sh --status   # check what's up
+scripts/dev.sh --stop     # stop what it started
+```
+
+Logs land in `.dev/logs/`. See below for what it's doing step by step, or to
+run pieces individually.
+
 ## 1. Start Redis
 
 Redis will be used at runtime as the LangGraph checkpoint store (AD-9) once

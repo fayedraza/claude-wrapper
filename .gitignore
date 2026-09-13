@@ -56,3 +56,6 @@ _bmad-output/test-artifacts/e2e-workspace/
 # Playwright MCP session artifacts (screenshots, snapshots) from
 # browser-driven manual verification during development.
 .playwright-mcp/
+
+# scripts/dev.sh runtime state (pid files + backend/frontend logs).
+/.dev/
