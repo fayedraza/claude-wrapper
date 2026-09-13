@@ -623,6 +623,9 @@ def test_decompose_task_computes_flight_path_and_aggregate_estimates(
         result.aggregate_estimated_duration_seconds
         == orchestrator.estimated_duration_seconds + worker.estimated_duration_seconds
     )
+    assert orchestrator.estimated_cost_usd > 0
+    assert worker.estimated_cost_usd > 0
+    assert result.aggregate_estimated_cost_usd == orchestrator.estimated_cost_usd + worker.estimated_cost_usd
 
 
 def test_decompose_task_ignores_llm_proposed_computed_fields(
@@ -644,10 +647,12 @@ def test_decompose_task_ignores_llm_proposed_computed_fields(
                 flight_path=["optional_only"],
                 estimated_tokens=999999,
                 estimated_duration_seconds=999999.0,
+                estimated_cost_usd=999999.0,
             ),
         ],
         aggregate_estimated_tokens=123456,
         aggregate_estimated_duration_seconds=123456.0,
+        aggregate_estimated_cost_usd=123456.0,
     )
     client = make_fake_client(output=fake_output)
 
@@ -656,8 +661,10 @@ def test_decompose_task_ignores_llm_proposed_computed_fields(
     assert result.agents[0].flight_path == []
     assert result.agents[0].estimated_tokens == 0
     assert result.agents[0].estimated_duration_seconds == 0.0
+    assert result.agents[0].estimated_cost_usd == 0.0
     assert result.aggregate_estimated_tokens == 0
     assert result.aggregate_estimated_duration_seconds == 0.0
+    assert result.aggregate_estimated_cost_usd == 0.0
 
 
 def test_decompose_task_existing_codebase_multi_agent_every_agent_has_nodes(

@@ -19,6 +19,10 @@ Rules (Boundaries):
   missing/hallucinated `source_ref`) costs a flat constant.
 - Duration = total tokens / a throughput constant, plus a per-round-trip
   constant for every required `mcp` node on the path.
+- Dollar cost = total tokens * a placeholder fixed per-token rate (Design
+  Notes: no per-agent model is pinned yet -- same "reproducible placeholder
+  constant" treatment as the duration throughput/round-trip figures, not a
+  real per-model quote).
 - Budget is informational only: the path always covers every required node
   regardless of cost -- nothing here ever drops a required node.
 """
@@ -49,6 +53,12 @@ _TOKENS_PER_SECOND = 250.0
 # Flat latency added per required `mcp` node, representing that node's
 # round-trip tool-call overhead on top of raw token throughput.
 _MCP_ROUND_TRIP_SECONDS = 1.5
+
+# Placeholder per-token dollar rate used to turn a total token estimate into
+# a dollar-cost estimate -- Claude Sonnet 5 input pricing ($2 / 1M tokens),
+# chosen as a reasonable default since no per-agent model is pinned yet
+# (Design Notes). Revisit once real per-agent model selection exists.
+_USD_PER_TOKEN = 2.0 / 1_000_000
 
 
 def _resolve_under_project(project_root: Path, source_ref: str) -> Path | None:
@@ -145,11 +155,12 @@ def _order_required_nodes(required_nodes: list[Node]) -> list[str]:
 
 def select_flight_path(agent: AgentSpec, project_root: Path) -> AgentSpec:
     """Return `agent` with `flight_path`/`estimated_tokens`/
-    `estimated_duration_seconds` server-computed, overwriting whatever the
-    LLM proposed for those three fields (Boundaries).
+    `estimated_duration_seconds`/`estimated_cost_usd` server-computed,
+    overwriting whatever the LLM proposed for those four fields
+    (Boundaries).
 
     No required nodes (or an empty `nodes` list) -> `flight_path` is `[]`
-    and both estimates are `0` (I/O matrix row 4).
+    and all three estimates are `0` (I/O matrix row 4).
     """
     required_nodes = [node for node in agent.nodes if node.required]
     if not required_nodes:
@@ -158,6 +169,7 @@ def select_flight_path(agent: AgentSpec, project_root: Path) -> AgentSpec:
                 "flight_path": [],
                 "estimated_tokens": 0,
                 "estimated_duration_seconds": 0.0,
+                "estimated_cost_usd": 0.0,
             }
         )
 
@@ -167,11 +179,13 @@ def select_flight_path(agent: AgentSpec, project_root: Path) -> AgentSpec:
     total_tokens = sum(_node_token_cost(by_id[node_id], project_root) for node_id in path)
     mcp_count = sum(1 for node_id in path if by_id[node_id].source == "mcp")
     duration = (total_tokens / _TOKENS_PER_SECOND) + (mcp_count * _MCP_ROUND_TRIP_SECONDS)
+    cost_usd = total_tokens * _USD_PER_TOKEN
 
     return agent.model_copy(
         update={
             "flight_path": path,
             "estimated_tokens": total_tokens,
             "estimated_duration_seconds": duration,
+            "estimated_cost_usd": cost_usd,
         }
     )

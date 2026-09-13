@@ -122,6 +122,7 @@ export default function Home() {
               agents={decomposeState.blueprint.agents}
               aggregateEstimatedTokens={decomposeState.blueprint.aggregate_estimated_tokens}
               aggregateEstimatedDurationSeconds={decomposeState.blueprint.aggregate_estimated_duration_seconds}
+              aggregateEstimatedCostUsd={decomposeState.blueprint.aggregate_estimated_cost_usd}
             />
           </div>
         )}

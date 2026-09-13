@@ -48,6 +48,10 @@ export interface AgentSpec {
   /** Story 2.3, always server-computed: total duration estimate (seconds)
    * across `flight_path`. */
   estimated_duration_seconds: number;
+  /** Story 2.3, always server-computed: dollar-cost estimate for
+   * `estimated_tokens`, at a placeholder fixed rate (no per-agent model is
+   * pinned yet). */
+  estimated_cost_usd: number;
 }
 
 export interface DagBlueprint {
@@ -57,6 +61,8 @@ export interface DagBlueprint {
   aggregate_estimated_tokens: number;
   /** Story 2.3, always server-computed: sum of every agent's own `estimated_duration_seconds`. */
   aggregate_estimated_duration_seconds: number;
+  /** Story 2.3, always server-computed: sum of every agent's own `estimated_cost_usd`. */
+  aggregate_estimated_cost_usd: number;
 }
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";

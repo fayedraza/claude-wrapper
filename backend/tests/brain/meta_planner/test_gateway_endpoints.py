@@ -358,6 +358,9 @@ def test_decompose_response_includes_flight_path_and_aggregate_estimates(
         body["aggregate_estimated_duration_seconds"]
         == orchestrator["estimated_duration_seconds"] + worker["estimated_duration_seconds"]
     )
+    assert (
+        body["aggregate_estimated_cost_usd"] == orchestrator["estimated_cost_usd"] + worker["estimated_cost_usd"]
+    )
 
 
 def test_decompose_dedupes_duplicate_slugs_end_to_end(api_client: TestClient, mock_anthropic) -> None:

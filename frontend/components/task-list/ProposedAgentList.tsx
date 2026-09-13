@@ -12,6 +12,8 @@ interface ProposedAgentListProps {
   aggregateEstimatedTokens: number;
   /** Story 2.3, `DagBlueprint.aggregate_estimated_duration_seconds`. */
   aggregateEstimatedDurationSeconds: number;
+  /** Story 2.3, `DagBlueprint.aggregate_estimated_cost_usd`. */
+  aggregateEstimatedCostUsd: number;
 }
 
 /** Whole seconds/minutes, e.g. "3s" or "2m 5s" -- no fractional seconds
@@ -31,6 +33,16 @@ function formatTokens(tokens: number): string {
   return `${tokens.toLocaleString()} token${tokens === 1 ? "" : "s"}`;
 }
 
+/** e.g. "$0.02" or "$0.0006" for a sub-cent estimate -- a raw token count
+ * alone can read as alarming to a non-technical viewer with no price
+ * anchor, so this renders alongside it wherever tokens are shown. Below one
+ * cent, two decimal places would silently round to "$0.00" and look like a
+ * free run, so those switch to four decimal places instead. */
+function formatCost(usd: number): string {
+  if (usd > 0 && usd < 0.01) return `$${usd.toFixed(4)}`;
+  return `$${usd.toFixed(2)}`;
+}
+
 /**
  * DESIGN.md "task-list-row", planned state (`key-task-list.html`
  * `.task-card.is-planned`): dashed border, no shadow, to visually distinguish
@@ -43,16 +55,20 @@ function formatTokens(tokens: number): string {
  * agent's context graph (`AgentContextGraph`) -- no new route/drawer, no
  * drawn graph lines (no UX mock exists for this screen yet).
  *
- * Story 2.3: each agent's server-computed token/duration estimate renders
- * as a line on its (collapsed) card -- visible without expanding, per AC #2
- * -- and one aggregate total renders above the whole list (AC #3). Both are
- * read directly off `AgentSpec`/`DagBlueprint`'s server-computed fields,
- * never recomputed client-side.
+ * Story 2.3: each agent's server-computed token/duration/cost estimate
+ * renders as a line on its (collapsed) card -- visible without expanding,
+ * per AC #2 -- and one aggregate total renders above the whole list (AC
+ * #3). All three are read directly off `AgentSpec`/`DagBlueprint`'s
+ * server-computed fields, never recomputed client-side. The dollar-cost
+ * figure is a placeholder-rate estimate (no per-agent model is pinned yet)
+ * shown alongside the token count so it doesn't read as an unanchored,
+ * alarming number on its own.
  */
 export default function ProposedAgentList({
   agents,
   aggregateEstimatedTokens,
   aggregateEstimatedDurationSeconds,
+  aggregateEstimatedCostUsd,
 }: ProposedAgentListProps) {
   const [expandedNodeId, setExpandedNodeId] = useState<string | null>(null);
 
@@ -82,6 +98,10 @@ export default function ProposedAgentList({
         {" · "}
         <span className="font-bold text-text1 dark:text-text1-dark">
           {formatDuration(aggregateEstimatedDurationSeconds ?? 0)}
+        </span>
+        {" · "}
+        <span className="font-bold text-text1 dark:text-text1-dark">
+          {formatCost(aggregateEstimatedCostUsd ?? 0)}
         </span>
       </p>
       {agents.map((agent) => {
@@ -116,7 +136,8 @@ export default function ProposedAgentList({
             </p>
             <p className="mt-space-1 text-label text-text2 dark:text-text2-dark">
               {formatTokens(agent.estimated_tokens ?? 0)} ·{" "}
-              {formatDuration(agent.estimated_duration_seconds ?? 0)}
+              {formatDuration(agent.estimated_duration_seconds ?? 0)} ·{" "}
+              {formatCost(agent.estimated_cost_usd ?? 0)}
             </p>
             {expanded && (
               <div

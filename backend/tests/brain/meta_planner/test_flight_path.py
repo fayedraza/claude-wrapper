@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from brain.meta_planner.flight_path import _MAX_READ_BYTES, select_flight_path
+from brain.meta_planner.flight_path import _MAX_READ_BYTES, _USD_PER_TOKEN, select_flight_path
 from brain.meta_planner.models import AgentSpec
 
 
@@ -32,6 +32,7 @@ def test_flight_path_includes_only_required_nodes_ordered_by_neighbors(make_node
     assert result.flight_path == ["a", "b"]
     assert result.estimated_tokens == 1000  # two flat-cost nodes (claude_context)
     assert result.estimated_duration_seconds == 1000 / 250.0
+    assert result.estimated_cost_usd == 1000 * _USD_PER_TOKEN
 
 
 def test_flight_path_orders_disconnected_required_nodes_by_original_position(make_node) -> None:
@@ -184,6 +185,7 @@ def test_flight_path_no_required_nodes_yields_empty_path_and_zero_estimates(make
     assert result.flight_path == []
     assert result.estimated_tokens == 0
     assert result.estimated_duration_seconds == 0.0
+    assert result.estimated_cost_usd == 0.0
 
 
 def test_flight_path_empty_nodes_list_yields_empty_path_and_zero_estimates() -> None:
@@ -194,6 +196,7 @@ def test_flight_path_empty_nodes_list_yields_empty_path_and_zero_estimates() -> 
     assert result.flight_path == []
     assert result.estimated_tokens == 0
     assert result.estimated_duration_seconds == 0.0
+    assert result.estimated_cost_usd == 0.0
 
 
 # ---- mcp round-trip duration -------------------------------------------------
@@ -212,6 +215,22 @@ def test_flight_path_adds_round_trip_constant_per_required_mcp_node(make_node) -
     expected_duration = (expected_tokens / 250.0) + (2 * 1.5)
     assert result.estimated_tokens == expected_tokens
     assert result.estimated_duration_seconds == expected_duration
+    assert result.estimated_cost_usd == expected_tokens * _USD_PER_TOKEN
+
+
+# ---- dollar-cost estimate ----------------------------------------------------
+
+
+def test_flight_path_cost_usd_scales_linearly_with_token_count(tmp_path: Path, make_node) -> None:
+    real_file = tmp_path / "app.py"
+    real_file.write_text("x" * 40_000, encoding="utf-8")
+    nodes = [make_node("entrypoint", required=True, source="codebase_file", source_ref="app.py")]
+    agent = _agent(nodes)
+
+    result = select_flight_path(agent, tmp_path)
+
+    assert result.estimated_tokens == 10_000  # 40,000 chars / 4
+    assert result.estimated_cost_usd == 10_000 * _USD_PER_TOKEN
 
 
 # ---- never drops a required node regardless of cost -------------------------

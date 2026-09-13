@@ -14,10 +14,10 @@ uniqueness (Boundaries).
 Story 2.3 adds a pure-Python flight-path/cost pass (`flight_path.py`, no
 second LLM call, AD-7) run per agent right after its nodes are resolved: it
 selects the agent's `required=true` nodes as its `flight_path` and computes
-`estimated_tokens`/`estimated_duration_seconds`, then this module sums those
-into the top-level `aggregate_estimated_*` fields. Both are always
-server-computed, never trusted from the LLM even though the fields exist in
-the same `output_format` schema.
+`estimated_tokens`/`estimated_duration_seconds`/`estimated_cost_usd`, then
+this module sums those into the top-level `aggregate_estimated_*` fields.
+All three are always server-computed, never trusted from the LLM even
+though the fields exist in the same `output_format` schema.
 """
 
 from __future__ import annotations
@@ -346,11 +346,13 @@ def decompose_task(intent: str, project_root: Path, client: anthropic.Anthropic)
     # (already server-computed) estimate -- never an independent LLM value.
     aggregate_tokens = sum(agent.estimated_tokens for agent in final_agents)
     aggregate_duration = sum(agent.estimated_duration_seconds for agent in final_agents)
+    aggregate_cost_usd = sum(agent.estimated_cost_usd for agent in final_agents)
 
     return parsed.model_copy(
         update={
             "agents": final_agents,
             "aggregate_estimated_tokens": aggregate_tokens,
             "aggregate_estimated_duration_seconds": aggregate_duration,
+            "aggregate_estimated_cost_usd": aggregate_cost_usd,
         }
     )

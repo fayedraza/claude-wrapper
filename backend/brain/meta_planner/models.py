@@ -168,6 +168,15 @@ class AgentSpec(BaseModel):
             "`select_flight_path` -- never trust the LLM for this field."
         ),
     )
+    estimated_cost_usd: float = Field(
+        default=0.0,
+        description=(
+            "Server-computed (Story 2.3): dollar-cost estimate for "
+            "estimated_tokens, at a placeholder fixed rate (Design Notes -- "
+            "no per-agent model is pinned yet). Always overwritten by "
+            "`select_flight_path` -- never trust the LLM for this field."
+        ),
+    )
 
 
 class DagBlueprint(BaseModel):
@@ -189,5 +198,13 @@ class DagBlueprint(BaseModel):
             "Server-computed (Story 2.3): sum of every agent's own "
             "estimated_duration_seconds. Always overwritten by "
             "`decompose_task` -- never trust the LLM for this field."
+        ),
+    )
+    aggregate_estimated_cost_usd: float = Field(
+        default=0.0,
+        description=(
+            "Server-computed (Story 2.3): sum of every agent's own "
+            "estimated_cost_usd. Always overwritten by `decompose_task` -- "
+            "never trust the LLM for this field."
         ),
     )
