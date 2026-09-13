@@ -65,6 +65,14 @@ export default function SettingsDrawer({ open, onClose }: SettingsDrawerProps) {
     if (!open) return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
+        // Duplicates handleClose()'s body rather than calling it directly --
+        // referencing a component-scoped function from inside this effect
+        // would need it in the dependency array, which (since it's
+        // recreated every render) would re-subscribe the listener on every
+        // render instead of only when `open`/`onClose` change.
+        setRequestText("");
+        setRequestState({ phase: "idle" });
+        setCards([]);
         onClose();
         return;
       }
@@ -111,6 +119,19 @@ export default function SettingsDrawer({ open, onClose }: SettingsDrawerProps) {
   }, [open]);
 
   if (!open) return null;
+
+  function handleClose() {
+    // The drawer stays mounted across close/reopen (page.tsx toggles
+    // `open`, not whether this component exists), so its state otherwise
+    // survives closing -- clear the propose/approve flow (request text,
+    // LLM response, cards) here so reopening starts fresh instead of
+    // showing a stale result from a previous visit. "Currently configured"
+    // is untouched -- it always refetches live truth on open regardless.
+    setRequestText("");
+    setRequestState({ phase: "idle" });
+    setCards([]);
+    onClose();
+  }
 
   async function loadCurrentConfiguration() {
     const requestId = ++currentConfigRequestIdRef.current;
@@ -191,7 +212,7 @@ export default function SettingsDrawer({ open, onClose }: SettingsDrawerProps) {
       <button
         type="button"
         aria-label="Close settings"
-        onClick={onClose}
+        onClick={handleClose}
         className="absolute inset-0 bg-text1/28 dark:bg-black/50"
       />
 
@@ -213,7 +234,7 @@ export default function SettingsDrawer({ open, onClose }: SettingsDrawerProps) {
             <button
               type="button"
               aria-label="Close settings"
-              onClick={onClose}
+              onClick={handleClose}
               className="flex h-[30px] w-[30px] flex-shrink-0 items-center justify-center rounded-sm border border-black/10 bg-bg text-text2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2 dark:border-white/10 dark:bg-bg-dark dark:text-text2-dark"
             >
               &times;

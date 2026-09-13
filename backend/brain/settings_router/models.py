@@ -116,6 +116,17 @@ class PermissionGrant(BaseModel):
             "(.claude/settings.json, shared)."
         )
     )
+    exists: bool | None = Field(
+        default=None,
+        description=(
+            "Display-only: for a 'file' grant, whether that path exists on "
+            "disk right now (None for 'mcp' -- reachability isn't a "
+            "filesystem check). Computed fresh on every read, never "
+            "persisted -- this does not affect add/update validation "
+            "(Design Notes: targets are never validated for existence at "
+            "write time), it's only a UI hint."
+        ),
+    )
 
 
 class PermissionGrantsList(BaseModel):
